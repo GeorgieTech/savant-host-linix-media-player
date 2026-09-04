@@ -23,6 +23,60 @@
       color: var(--ink);
       overflow: hidden;
     }
+    .stage {
+      display: grid;
+      grid-template-columns: 1fr minmax(220px, 340px);
+      gap: 1rem;
+      min-height: 0;
+      align-items: stretch;
+    }
+    .playlist {
+      overflow-y: auto;
+      text-align: left;
+      border: 1px solid var(--line);
+      background: rgba(4, 10, 12, 0.62);
+      backdrop-filter: blur(6px);
+      min-height: 0;
+    }
+    .playlist h2 {
+      margin: 0;
+      padding: 0.55rem 0.7rem;
+      font-size: 0.65rem;
+      letter-spacing: 0.28em;
+      text-transform: uppercase;
+      color: var(--mute);
+      border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      background: rgba(4, 10, 12, 0.92);
+    }
+    .playlist button.row {
+      display: block;
+      width: 100%;
+      text-align: left;
+      letter-spacing: 0.02em;
+      text-transform: none;
+      min-width: 0;
+      border: 0;
+      border-bottom: 1px solid rgba(77, 255, 210, 0.08);
+      border-radius: 0;
+      box-shadow: none;
+      padding: 0.55rem 0.7rem;
+      background: transparent;
+      color: var(--ink);
+      font-size: 0.82rem;
+    }
+    .playlist button.row:hover { background: var(--cyan-dim); }
+    .playlist button.row.active {
+      color: var(--amber);
+      background: rgba(255, 154, 60, 0.12);
+    }
+    .playlist .num {
+      color: var(--mute);
+      font-size: 0.68rem;
+      letter-spacing: 0.12em;
+      margin-right: 0.45rem;
+    }
     canvas#viz {
       position: fixed;
       inset: 0;
@@ -156,9 +210,12 @@
       letter-spacing: 0.08em;
     }
     .stats b { color: var(--ink); font-weight: 500; }
-    @media (max-width: 640px) {
+    @media (max-width: 860px) {
       .stats { display: none; }
       body { overflow: auto; }
+      .hud { height: auto; min-height: 100%; }
+      .stage { grid-template-columns: 1fr; }
+      .playlist { max-height: 42vh; }
     }
   </style>
 </head>
@@ -173,19 +230,24 @@
       </div>
       <div class="chip" id="chip">STANDBY</div>
     </div>
-    <div class="center">
-      <div class="now-label">Now playing</div>
-      <div class="now" id="track">—</div>
-      <div class="meta" id="player-sub">linking host</div>
-      <div class="controls">
-        <button class="primary" id="btn-play" type="button">Play</button>
-        <button id="btn-stop" type="button">Stop</button>
-        <button id="btn-next" type="button">Next</button>
-        <label class="vol">Vol
-          <input id="vol" type="range" min="0" max="100" value="80">
-          <span id="vol-label">80</span>
-        </label>
+    <div class="stage">
+      <div class="center">
+        <div class="now-label">Now playing</div>
+        <div class="now" id="track">—</div>
+        <div class="meta" id="player-sub">linking host</div>
+        <div class="controls">
+          <button class="primary" id="btn-play" type="button">Play</button>
+          <button id="btn-stop" type="button">Stop</button>
+          <button id="btn-next" type="button">Next</button>
+          <label class="vol">Vol
+            <input id="vol" type="range" min="0" max="100" value="80">
+            <span id="vol-label">80</span>
+          </label>
+        </div>
       </div>
+      <aside class="playlist" id="playlist">
+        <h2>Library</h2>
+      </aside>
     </div>
     <div class="bottom">
       <div class="stats">
@@ -311,7 +373,7 @@
         const chip = document.getElementById("chip");
         chip.textContent = state.playing ? "LIVE" : "STANDBY";
         chip.className = "chip" + (state.playing ? " live" : "");
-        document.getElementById("track").textContent = p.track || "No media";
+        document.getElementById("track").textContent = prettyName(p.track) || "No media";
         const sub = document.getElementById("player-sub");
         sub.className = "meta" + (p.error ? " err" : "");
         sub.textContent = p.error
@@ -323,11 +385,35 @@
           document.getElementById("vol").value = p.volume;
           document.getElementById("vol-label").textContent = p.volume;
         }
+        renderList(p);
         document.getElementById("stamp").textContent = new Date().toLocaleTimeString();
       } catch (err) {
         document.getElementById("player-sub").textContent = String(err.message || err);
         document.getElementById("player-sub").className = "meta err";
       }
+    }
+    function prettyName(path) {
+      const base = (path || "").split("/").pop() || path || "";
+      return base.replace(/\.[^.]+$/, "");
+    }
+    function renderList(p) {
+      const box = document.getElementById("playlist");
+      const tracks = p.tracks || [];
+      const idx = typeof p.index === "number" ? p.index : -1;
+      const sig = tracks.length + ":" + idx + ":" + (p.playing ? "1" : "0");
+      if (box.dataset.sig === sig) return;
+      box.dataset.sig = sig;
+      box.innerHTML = "<h2>Library · " + tracks.length + "</h2>";
+      tracks.forEach((name, i) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "row" + (i === idx ? " active" : "");
+        btn.innerHTML = "<span class=\"num\">" + String(i + 1).padStart(2, "0") + "</span>" + prettyName(name);
+        btn.onclick = () => post("/api/play", { index: i });
+        box.appendChild(btn);
+      });
+      const active = box.querySelector(".row.active");
+      if (active) active.scrollIntoView({ block: "nearest" });
     }
     async function post(path, body) {
       await fetch(path, {

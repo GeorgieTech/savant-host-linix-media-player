@@ -107,6 +107,7 @@ class Jukebox:
             return {
                 "playing": self._alive(),
                 "track": current,
+                "index": self.index if tracks else -1,
                 "tracks": names,
                 "volume": self.volume,
                 "error": self.error,
@@ -162,8 +163,19 @@ class Jukebox:
             self.index = (self.index + 1) % len(tracks)
             return self._play_locked()
 
-    def play(self):
+    def play(self, index=None):
         with self.lock:
+            if index is not None:
+                try:
+                    index = int(index)
+                except (TypeError, ValueError):
+                    self.error = "bad track index"
+                    return False
+                tracks = self.tracks()
+                if index < 0 or index >= len(tracks):
+                    self.error = "bad track index"
+                    return False
+                self.index = index
             return self._play_locked()
 
     def _play_locked(self):
@@ -288,7 +300,7 @@ class Handler(SimpleHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         data = _read_json(self)
         if path == "/api/play":
-            ok = PLAYER.play()
+            ok = PLAYER.play(index=data.get("index"))
             _json(self, PLAYER.snapshot(), 200 if ok else 409)
             return
         if path == "/api/stop":
