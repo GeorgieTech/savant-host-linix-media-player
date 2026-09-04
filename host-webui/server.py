@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import re
 import shlex
 import signal
 import socket
@@ -13,6 +14,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("WEBUI_PORT", "80"))
 MUSIC_DIR = os.environ.get("MUSIC_DIR", "/data/music")
 AUDIO_EXTS = {".mp3", ".flac", ".opus", ".ogg", ".wav", ".m4a", ".aac"}
+RMS_RE = re.compile(r"RMS(?:_level| level dB:)\s*=?\s*(-?[\d.]+)")
 
 
 def _cmd(args):
@@ -75,6 +77,7 @@ class Jukebox:
         self.volume = 80
         self.error = ""
         self.track = None
+        self.rms = 0.0
 
     def tracks(self):
         found = []
@@ -107,6 +110,7 @@ class Jukebox:
                 "tracks": names,
                 "volume": self.volume,
                 "error": self.error,
+                "rms": round(self.rms, 3) if self._alive() else 0.0,
                 "backend": "ffmpeg | paplay",
             }
 
@@ -134,6 +138,7 @@ class Jukebox:
             except Exception:
                 pass
         self.proc = None
+        self.rms = 0.0
 
     def set_volume(self, value):
         try:
@@ -171,8 +176,9 @@ class Jukebox:
         self._stop_locked()
         gain = max(0.0, min(1.0, self.volume / 100.0))
         cmd = (
-            "ffmpeg -nostdin -hide_banner -loglevel error -i %s "
-            "-filter:a volume=%s -ac 2 -ar 48000 -f wav - | paplay"
+            "ffmpeg -nostdin -hide_banner -nostats -loglevel info -i %s "
+            "-filter:a volume=%s,astats=length=0.05:metadata=1:reset=1 "
+            "-ac 2 -ar 48000 -f wav - | paplay"
             % (shlex.quote(path), gain)
         )
         try:
@@ -186,26 +192,33 @@ class Jukebox:
         except Exception as exc:
             self.error = str(exc)
             self.proc = None
+            self.rms = 0.0
             return False
-        threading.Timer(0.4, self._check_start, args=(path,)).start()
+        threading.Thread(target=self._meter, args=(self.proc,), daemon=True).start()
         self.track = path
         self.error = ""
+        self.rms = 0.15
         return True
 
-    def _check_start(self, path):
+    def _meter(self, proc):
+        try:
+            while True:
+                line = proc.stderr.readline()
+                if not line:
+                    break
+                text = line.decode("utf-8", "replace")
+                match = RMS_RE.search(text)
+                if match:
+                    db = float(match.group(1))
+                    amp = max(0.0, min(1.0, (db + 50.0) / 50.0))
+                    with self.lock:
+                        self.rms = amp
+        except Exception:
+            pass
         with self.lock:
-            if self.proc is None:
-                return
-            code = self.proc.poll()
-            if code is None:
-                return
-            err = ""
-            try:
-                err = (self.proc.stderr.read() or b"").decode("utf-8", "replace").strip()
-            except Exception:
-                pass
-            self.error = err or ("player exited %s" % code)
-            self.proc = None
+            if self.proc is proc:
+                self.proc = None
+                self.rms = 0.0
 
 
 PLAYER = Jukebox()

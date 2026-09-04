@@ -3,196 +3,217 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Lab Host</title>
+  <title>SIGNAL</title>
   <style>
     :root {
-      --bg: #161410;
-      --bg-2: #1f1b16;
-      --panel: #241f18;
-      --line: #3a3328;
-      --ink: #ece4d4;
-      --muted: #9a8e78;
-      --accent: #d9772a;
-      --ok: #7aab5a;
-      --warn: #c4a035;
-      --bad: #c45a3a;
+      --void: #04060a;
+      --cyan: #4dffd2;
+      --cyan-dim: rgba(77, 255, 210, 0.14);
+      --amber: #ff9a3c;
+      --ink: #d7fff4;
+      --mute: #6f8f86;
+      --line: rgba(77, 255, 210, 0.22);
+      --danger: #ff5a4a;
     }
     * { box-sizing: border-box; }
-    html, body { margin: 0; min-height: 100%; }
+    html, body { margin: 0; height: 100%; }
     body {
-      font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
-      background:
-        radial-gradient(1200px 500px at 10% -10%, #2a2218 0%, transparent 55%),
-        var(--bg);
+      font-family: "Avenir Next Condensed", "Avenir Next", "Segoe UI", sans-serif;
+      background: var(--void);
       color: var(--ink);
+      overflow: hidden;
     }
-    header {
+    canvas#viz {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+    }
+    .grain {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+      opacity: 0.09;
+      background-image: repeating-linear-gradient(
+        0deg,
+        transparent 0,
+        transparent 2px,
+        rgba(0, 0, 0, 0.35) 3px
+      );
+    }
+    .hud {
+      position: relative;
+      z-index: 2;
+      height: 100%;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      padding: 1.1rem 1.25rem 1.2rem;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .top, .bottom {
       display: flex;
       justify-content: space-between;
-      align-items: baseline;
+      align-items: flex-end;
       gap: 1rem;
-      padding: 1.5rem 1.75rem 1rem;
-      border-bottom: 1px solid var(--line);
     }
-    header h1 {
-      font-family: Palatino, "Palatino Linotype", "Times New Roman", serif;
-      font-weight: 600;
-      letter-spacing: 0.02em;
-      font-size: 1.65rem;
-      margin: 0;
+    .mark {
+      letter-spacing: 0.42em;
+      font-size: 0.68rem;
+      color: var(--cyan);
+      text-transform: uppercase;
     }
-    header p { margin: 0.15rem 0 0; color: var(--muted); font-size: 0.92rem; }
-    .jukebox { margin-top: 1.1rem; }
+    h1 {
+      margin: 0.2rem 0 0;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      font-size: clamp(1.1rem, 3vw, 1.7rem);
+      text-transform: uppercase;
+    }
+    .chip {
+      border: 1px solid var(--line);
+      padding: 0.35rem 0.55rem;
+      font-size: 0.68rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--cyan);
+      background: rgba(4, 8, 10, 0.45);
+    }
+    .chip.live { color: var(--amber); border-color: rgba(255, 154, 60, 0.55); }
+    .center {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      padding-bottom: 1.4rem;
+      text-align: center;
+    }
+    .now-label {
+      letter-spacing: 0.34em;
+      font-size: 0.65rem;
+      color: var(--mute);
+      text-transform: uppercase;
+    }
     .now {
-      font-family: Palatino, "Palatino Linotype", "Times New Roman", serif;
-      font-size: 1.35rem;
-      margin: 0 0 0.35rem;
+      margin: 0.35rem 0 0.2rem;
+      font-size: clamp(1.2rem, 3.4vw, 2rem);
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      max-width: 90vw;
+      text-shadow: 0 0 24px rgba(77, 255, 210, 0.25);
     }
+    .meta { color: var(--mute); font-size: 0.85rem; min-height: 1.2em; }
+    .err { color: var(--danger); }
     .controls {
       display: flex;
       flex-wrap: wrap;
       gap: 0.55rem;
+      justify-content: center;
       align-items: center;
-      margin-top: 0.9rem;
+      margin-top: 1.15rem;
     }
     button {
       appearance: none;
-      border: 1px solid var(--accent);
+      cursor: pointer;
+      border: 1px solid var(--cyan);
       background: transparent;
       color: var(--ink);
-      font: inherit;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.22em;
       text-transform: uppercase;
-      font-size: 0.78rem;
-      padding: 0.55rem 0.9rem;
-      cursor: pointer;
+      font-size: 0.72rem;
+      padding: 0.7rem 1.15rem;
+      min-width: 6.4rem;
+      box-shadow: 0 0 16px rgba(77, 255, 210, 0.08);
     }
-    button:hover { background: #2e261c; }
-    button.primary { background: var(--accent); color: #1a140e; border-color: var(--accent); }
+    button:hover { background: var(--cyan-dim); }
+    button.primary {
+      background: var(--cyan);
+      color: #03110c;
+      font-weight: 600;
+    }
     .vol {
       display: flex;
       align-items: center;
-      gap: 0.5rem;
-      color: var(--muted);
-      font-size: 0.8rem;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-    }
-    input[type=range] { width: 140px; accent-color: var(--accent); }
-    .badge {
-      font-size: 0.72rem;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      border: 1px solid var(--accent);
-      color: var(--accent);
-      padding: 0.35rem 0.55rem;
-      white-space: nowrap;
-    }
-    main {
-      max-width: 980px;
-      margin: 0 auto;
-      padding: 1.25rem 1.25rem 3rem;
-    }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 0.85rem;
-    }
-    .card {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      padding: 1rem 1.05rem 1.1rem;
-    }
-    .card h2 {
-      margin: 0 0 0.55rem;
-      font-size: 0.72rem;
+      gap: 0.55rem;
       letter-spacing: 0.16em;
       text-transform: uppercase;
-      color: var(--muted);
-      font-weight: 600;
+      font-size: 0.68rem;
+      color: var(--mute);
+      margin-left: 0.4rem;
     }
-    .value { font-size: 1.25rem; line-height: 1.25; word-break: break-word; }
-    .sub { margin-top: 0.35rem; color: var(--muted); font-size: 0.85rem; }
-    .dot {
-      display: inline-block;
-      width: 0.55rem; height: 0.55rem;
-      border-radius: 50%;
-      margin-right: 0.4rem;
-      background: var(--warn);
+    input[type=range] {
+      width: 150px;
+      accent-color: var(--amber);
     }
-    .dot.ok { background: var(--ok); }
-    .dot.bad { background: var(--bad); }
-    section.note {
-      margin-top: 1.25rem;
-      padding: 1rem 1.1rem;
-      border-left: 3px solid var(--accent);
-      background: var(--bg-2);
+    .stats {
+      display: flex;
+      gap: 1.2rem;
+      flex-wrap: wrap;
+      color: var(--mute);
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
     }
-    section.note h2 { margin: 0 0 0.4rem; font-size: 1rem; }
-    section.note p { margin: 0; color: var(--muted); line-height: 1.5; }
-    footer {
-      margin-top: 2rem;
-      color: var(--muted);
-      font-size: 0.8rem;
+    .stats b { color: var(--ink); font-weight: 500; }
+    @media (max-width: 640px) {
+      .stats { display: none; }
+      body { overflow: auto; }
     }
   </style>
 </head>
 <body>
-  <header>
-    <div>
-      <h1 id="title">Lab Host</h1>
-      <p id="subtitle">Local jukebox V0.1 · files on /data/music</p>
+  <canvas id="viz"></canvas>
+  <div class="grain"></div>
+  <div class="hud">
+    <div class="top">
+      <div>
+        <div class="mark">Local node</div>
+        <h1 id="title">SIGNAL</h1>
+      </div>
+      <div class="chip" id="chip">STANDBY</div>
     </div>
-    <div class="badge" id="role">Jukebox</div>
-  </header>
-  <main>
-    <div class="grid">
-      <article class="card">
-        <h2>Status</h2>
-        <div class="value"><span class="dot" id="status-dot"></span><span id="status-text">Checking…</span></div>
-        <div class="sub" id="status-sub">Talking to the box</div>
-      </article>
-      <article class="card">
-        <h2>Host</h2>
-        <div class="value" id="hostname">—</div>
-        <div class="sub" id="ip">—</div>
-      </article>
-      <article class="card">
-        <h2>Uptime</h2>
-        <div class="value" id="uptime">—</div>
-        <div class="sub" id="load">—</div>
-      </article>
-      <article class="card">
-        <h2>Memory</h2>
-        <div class="value" id="mem">—</div>
-        <div class="sub" id="disk">—</div>
-      </article>
-    </div>
-    <article class="card jukebox">
-      <h2>Now playing</h2>
-      <div class="now" id="track">No track loaded</div>
-      <div class="sub" id="player-sub">Waiting for library</div>
+    <div class="center">
+      <div class="now-label">Now playing</div>
+      <div class="now" id="track">—</div>
+      <div class="meta" id="player-sub">linking host</div>
       <div class="controls">
         <button class="primary" id="btn-play" type="button">Play</button>
         <button id="btn-stop" type="button">Stop</button>
         <button id="btn-next" type="button">Next</button>
-        <label class="vol">Volume
+        <label class="vol">Vol
           <input id="vol" type="range" min="0" max="100" value="80">
           <span id="vol-label">80</span>
         </label>
       </div>
-    </article>
-    <section class="note">
-      <h2>Savant is stopped on this unit</h2>
-      <p>
-        The Savant launcher is disabled at boot. This page is served from
-        <code>/data/www</code> on port 80. Firmware is still Savant Embedded Linux
-        underneath, so a reflash can restore the original product later.
-      </p>
-    </section>
-    <footer id="stamp"></footer>
-  </main>
+    </div>
+    <div class="bottom">
+      <div class="stats">
+        <span>HOST <b id="hostname">—</b></span>
+        <span>NET <b id="ip">—</b></span>
+        <span>UP <b id="uptime">—</b></span>
+        <span>MEM <b id="mem">—</b></span>
+      </div>
+      <div class="stats"><span id="stamp"></span></div>
+    </div>
+  </div>
   <script>
+    const state = { playing: false, rms: 0, volume: 80, bins: new Float32Array(72) };
+    const canvas = document.getElementById("viz");
+    const ctx = canvas.getContext("2d");
+    let w = 0, h = 0, dpr = 1;
+
+    function resize() {
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      w = canvas.clientWidth;
+      h = canvas.clientHeight;
+      canvas.width = Math.floor(w * dpr);
+      canvas.height = Math.floor(h * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    window.addEventListener("resize", resize);
+    resize();
+
     function fmtBytes(n) {
       if (n == null) return "—";
       const u = ["B", "KB", "MB", "GB"];
@@ -200,46 +221,112 @@
       while (x >= 1024 && i < u.length - 1) { x /= 1024; i++; }
       return x.toFixed(i === 0 ? 0 : 1) + " " + u[i];
     }
+
+    function noise(i, t) {
+      return 0.5 + 0.5 * Math.sin(i * 0.37 + t * 2.1) * Math.cos(i * 0.11 - t * 1.4);
+    }
+
+    function tick(ts) {
+      const t = ts / 1000;
+      const cx = w / 2;
+      const cy = h * 0.42;
+      const energy = state.playing ? (0.22 + state.rms * 0.9) * (0.35 + state.volume / 140) : 0.06;
+      const n = state.bins.length;
+      for (let i = 0; i < n; i++) {
+        const target = energy * (0.35 + noise(i, t) * (state.playing ? 1 : 0.25));
+        state.bins[i] += (target - state.bins[i]) * 0.22;
+      }
+      ctx.fillStyle = "rgba(4, 6, 10, 0.28)";
+      ctx.fillRect(0, 0, w, h);
+
+      const grd = ctx.createRadialGradient(cx, cy, 20, cx, cy, Math.max(w, h) * 0.55);
+      grd.addColorStop(0, state.playing ? "rgba(77,255,210,0.10)" : "rgba(77,255,210,0.03)");
+      grd.addColorStop(1, "rgba(4,6,10,0)");
+      ctx.fillStyle = grd;
+      ctx.fillRect(0, 0, w, h);
+
+      ctx.strokeStyle = "rgba(77,255,210,0.06)";
+      ctx.lineWidth = 1;
+      for (let r = 80; r < 420; r += 46) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      const sweep = t * 0.7;
+      ctx.beginPath();
+      ctx.strokeStyle = "rgba(255,154,60,0.18)";
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(sweep) * 380, cy + Math.sin(sweep) * 380);
+      ctx.stroke();
+
+      const radius = Math.min(w, h) * 0.28;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2 - Math.PI / 2;
+        const mag = state.bins[i];
+        const inner = radius * 0.62;
+        const outer = inner + mag * radius * 1.15;
+        const x0 = cx + Math.cos(a) * inner;
+        const y0 = cy + Math.sin(a) * inner;
+        const x1 = cx + Math.cos(a) * outer;
+        const y1 = cy + Math.sin(a) * outer;
+        ctx.strokeStyle = i % 8 === 0 ? "rgba(255,154,60,0.9)" : "rgba(77,255,210,0.85)";
+        ctx.lineWidth = i % 8 === 0 ? 2.2 : 1.3;
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y1);
+        ctx.stroke();
+      }
+
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius * 0.18 + energy * 18, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(77,255,210,0.85)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy, 3 + energy * 10, 0, Math.PI * 2);
+      ctx.fillStyle = state.playing ? "rgba(255,154,60,0.95)" : "rgba(77,255,210,0.5)";
+      ctx.fill();
+
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+
     async function refresh() {
       try {
         const r = await fetch("/api/status", { cache: "no-store" });
         if (!r.ok) throw new Error("http " + r.status);
         const d = await r.json();
-        document.getElementById("title").textContent = d.hostname || "Lab Host";
+        document.getElementById("title").textContent = d.hostname || "SIGNAL";
         document.getElementById("hostname").textContent = d.hostname || "—";
-        document.getElementById("ip").textContent = d.ip ? d.ip + " · port 80" : "—";
+        document.getElementById("ip").textContent = d.ip || "—";
         document.getElementById("uptime").textContent = d.uptime || "—";
-        document.getElementById("load").textContent = d.load ? "load " + d.load : "—";
         document.getElementById("mem").textContent = d.mem
           ? fmtBytes(d.mem.used) + " / " + fmtBytes(d.mem.total)
           : "—";
-        document.getElementById("disk").textContent = d.disk
-          ? "/data " + fmtBytes(d.disk.used) + " / " + fmtBytes(d.disk.total)
-          : "—";
-        const savant = !!d.savant_running;
-        const dot = document.getElementById("status-dot");
-        document.getElementById("status-text").textContent = savant ? "Savant still running" : "Custom UI only";
-        document.getElementById("status-sub").textContent = savant
-          ? "Launcher process is still alive"
-          : "startupManager is not running";
-        dot.className = "dot " + (savant ? "bad" : "ok");
         const p = d.player || {};
-        document.getElementById("track").textContent = p.track || "No track loaded";
-        let sub = (p.tracks && p.tracks.length)
-          ? (p.playing ? "Playing" : "Stopped") + " · " + p.tracks.length + " in library"
-          : "Copy audio into /data/music";
-        if (p.error) sub = p.error;
-        document.getElementById("player-sub").textContent = sub;
-        if (typeof p.volume === "number") {
+        state.playing = !!p.playing;
+        state.rms = typeof p.rms === "number" ? p.rms : 0;
+        state.volume = typeof p.volume === "number" ? p.volume : state.volume;
+        const chip = document.getElementById("chip");
+        chip.textContent = state.playing ? "LIVE" : "STANDBY";
+        chip.className = "chip" + (state.playing ? " live" : "");
+        document.getElementById("track").textContent = p.track || "No media";
+        const sub = document.getElementById("player-sub");
+        sub.className = "meta" + (p.error ? " err" : "");
+        sub.textContent = p.error
+          ? p.error
+          : ((p.tracks && p.tracks.length)
+            ? (state.playing ? "decode · paplay · spdif" : "library " + p.tracks.length)
+            : "empty /data/music");
+        if (typeof p.volume === "number" && document.activeElement !== document.getElementById("vol")) {
           document.getElementById("vol").value = p.volume;
           document.getElementById("vol-label").textContent = p.volume;
         }
-        document.getElementById("stamp").textContent =
-          "Updated " + new Date().toLocaleString();
+        document.getElementById("stamp").textContent = new Date().toLocaleTimeString();
       } catch (err) {
-        document.getElementById("status-text").textContent = "UI server unreachable";
-        document.getElementById("status-sub").textContent = String(err.message || err);
-        document.getElementById("status-dot").className = "dot bad";
+        document.getElementById("player-sub").textContent = String(err.message || err);
+        document.getElementById("player-sub").className = "meta err";
       }
     }
     async function post(path, body) {
@@ -259,8 +346,19 @@
     document.getElementById("vol").onchange = (ev) => {
       post("/api/volume", { volume: Number(ev.target.value) });
     };
+    async function pulse() {
+      try {
+        const r = await fetch("/api/player", { cache: "no-store" });
+        if (!r.ok) return;
+        const p = await r.json();
+        state.playing = !!p.playing;
+        state.rms = typeof p.rms === "number" ? p.rms : 0;
+        state.volume = typeof p.volume === "number" ? p.volume : state.volume;
+      } catch (_e) {}
+    }
     refresh();
-    setInterval(refresh, 4000);
+    setInterval(refresh, 2000);
+    setInterval(pulse, 120);
   </script>
 </body>
 </html>
