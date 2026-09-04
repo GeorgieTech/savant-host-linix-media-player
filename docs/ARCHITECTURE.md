@@ -18,12 +18,12 @@ browser  --HTTP-->  python3 server.py :80
                          +-- GET /           UI
                          +-- GET /api/status host stats
                          +-- GET /api/player now playing, queue
-                         +-- POST /api/play|/stop|/next|/volume
+                         +-- POST /api/play|/pause|/stop|/next|/volume|/seek
                          |
-                         +-- child: ffmpeg | paplay   (V0.1)
+                         +-- child: ffmpeg | paplay   (V0.1+)
 ```
 
-Only one decoder child at a time. Stop = kill the child. Next = kill, start the next file.
+Only one decoder child at a time. Stop = kill the child. Next = kill, start the next file. Pause = SIGSTOP the process group (ffmpeg + paplay); Resume = SIGCONT. Seek = kill and restart ffmpeg with `-ss`.
 
 ## Library
 
@@ -60,14 +60,16 @@ Do not depend on `amixer` until ALSA device names on this i.MX6 are confirmed. P
 
 ## UI
 
-Same visual language as the current lab page (dark panel, copper accent). Add four controls only:
+Same visual language as the current lab page (dark panel, copper accent). Transport:
 
 - Play
+- Pause / Resume
 - Stop
 - Volume
 - Next
+- Seek bar (elapsed / duration) plus a progress ring on the HUD
 
-Now-playing line under the buttons. No accounts, no websockets required: short polling of `/api/player` is enough.
+Now-playing line under the buttons. No accounts, no websockets required: short polling of `/api/player` is enough. Position is wall-clock plus ffmpeg `out_time`, duration from `ffprobe` (ffmpeg Duration line as fallback).
 
 ## What we are not building (yet)
 

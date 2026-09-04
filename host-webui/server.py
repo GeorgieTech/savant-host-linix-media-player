@@ -10,6 +10,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -17,7 +18,10 @@ PORT = int(os.environ.get("WEBUI_PORT", "80"))
 MUSIC_DIR = os.environ.get("MUSIC_DIR", "/data/music")
 AUDIO_EXTS = {".mp3", ".flac", ".opus", ".ogg", ".wav", ".m4a", ".aac"}
 RMS_RE = re.compile(r"RMS(?:_level| level dB:)\s*=?\s*(-?[\d.]+)")
+DUR_RE = re.compile(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
+OUT_RE = re.compile(r"out_time=(\d+):(\d+):(\d+(?:\.\d+)?)")
 MAX_UPLOAD = 90 * 1024 * 1024
+VERSION = "0.3"
 LIBRARY_FILE = os.path.join(MUSIC_DIR, ".library.json")
 GENRES = [
     "Pop",
@@ -38,6 +42,10 @@ def _cmd(args):
         return subprocess.check_output(args, stderr=subprocess.DEVNULL, text=True).strip()
     except Exception:
         return ""
+
+
+def _hms(match):
+    return int(match.group(1)) * 3600 + int(match.group(2)) * 60 + float(match.group(3))
 
 
 def meminfo():
@@ -95,6 +103,12 @@ class Jukebox:
         self.track = None
         self.rms = 0.0
         self.tags = {}
+        self.paused = False
+        self.offset = 0.0
+        self.t0 = 0.0
+        self.hold = 0.0
+        self.duration = 0.0
+        self.durations = {}
         self._load_tags()
 
     def _load_tags(self):
@@ -127,11 +141,64 @@ class Jukebox:
     def _alive(self):
         return self.proc is not None and self.proc.poll() is None
 
+    def _position_locked(self):
+        if self.paused or not self._alive():
+            pos = self.hold
+        else:
+            pos = self.offset + (time.monotonic() - self.t0)
+        if self.duration > 0:
+            pos = min(pos, self.duration)
+        return round(max(0.0, pos), 2)
+
+    def _probe_duration(self, path):
+        if path in self.durations:
+            return self.durations[path]
+        out = _cmd(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                path,
+            ]
+        )
+        try:
+            dur = float(out)
+            if dur > 0:
+                self.durations[path] = dur
+                return dur
+        except (TypeError, ValueError):
+            pass
+        try:
+            proc = subprocess.run(
+                ["ffmpeg", "-nostdin", "-hide_banner", "-i", path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=8,
+            )
+            match = DUR_RE.search(proc.stderr or "")
+            if match:
+                dur = _hms(match)
+                if dur > 0:
+                    self.durations[path] = dur
+                    return dur
+        except Exception:
+            pass
+        return 0.0
+
     def snapshot(self):
         with self.lock:
             tracks = self.tracks()
             if self.proc is not None and self.proc.poll() is not None:
+                if self.duration:
+                    self.hold = self.duration
                 self.proc = None
+                self.paused = False
+                self.rms = 0.0
             names = [os.path.relpath(p, MUSIC_DIR) for p in tracks]
             keep = set(names)
             if any(key not in keep for key in list(self.tags.keys())):
@@ -144,8 +211,14 @@ class Jukebox:
             if tracks:
                 self.index %= len(tracks)
                 current = os.path.relpath(tracks[self.index], MUSIC_DIR)
+            alive = self._alive()
+            paused = bool(self.paused and alive)
+            playing = bool(alive and not paused)
+            position = self._position_locked()
+            duration = round(self.duration, 2)
             return {
-                "playing": self._alive(),
+                "playing": playing,
+                "paused": paused,
                 "track": current,
                 "index": self.index if tracks else -1,
                 "tracks": names,
@@ -153,8 +226,11 @@ class Jukebox:
                 "genres": GENRES,
                 "volume": self.volume,
                 "error": self.error,
-                "rms": round(self.rms, 3) if self._alive() else 0.0,
+                "rms": round(self.rms, 3) if playing else 0.0,
+                "position": position,
+                "duration": duration,
                 "backend": "ffmpeg | paplay",
+                "version": VERSION,
             }
 
     def stop(self):
@@ -165,9 +241,19 @@ class Jukebox:
 
     def _stop_locked(self):
         if self.proc is None:
+            self.paused = False
+            self.offset = 0.0
+            self.hold = 0.0
+            self.rms = 0.0
             return
         try:
-            os.killpg(os.getpgid(self.proc.pid), signal.SIGTERM)
+            pgid = os.getpgid(self.proc.pid)
+            if self.paused:
+                try:
+                    os.killpg(pgid, signal.SIGCONT)
+                except Exception:
+                    pass
+            os.killpg(pgid, signal.SIGTERM)
         except Exception:
             try:
                 self.proc.terminate()
@@ -182,6 +268,9 @@ class Jukebox:
                 pass
         self.proc = None
         self.rms = 0.0
+        self.paused = False
+        self.offset = 0.0
+        self.hold = 0.0
 
     def set_volume(self, value):
         try:
@@ -191,9 +280,10 @@ class Jukebox:
         vol = max(0, min(100, vol))
         with self.lock:
             restart = self._alive()
+            pos = self._position_locked() if restart else 0.0
             self.volume = vol
             if restart:
-                return self._play_locked()
+                return self._play_locked(start=pos)
         return True
 
     def next_track(self):
@@ -218,7 +308,73 @@ class Jukebox:
                     self.error = "bad track index"
                     return False
                 self.index = index
-            return self._play_locked()
+                return self._play_locked(start=0.0)
+            if self.paused and self._alive():
+                return self._resume_locked()
+            if self._alive():
+                self.error = ""
+                return True
+            return self._play_locked(start=0.0)
+
+    def pause(self):
+        with self.lock:
+            if self.paused and self._alive():
+                self.error = ""
+                return True
+            if not self._alive():
+                self.error = "nothing playing"
+                return False
+            return self._pause_locked()
+
+    def seek(self, seconds=None, ratio=None):
+        with self.lock:
+            tracks = self.tracks()
+            if not tracks:
+                self.error = "no tracks in /data/music"
+                return False
+            path = tracks[self.index % len(tracks)]
+            if self.duration <= 0:
+                self.duration = self._probe_duration(path)
+            try:
+                if seconds is not None:
+                    pos = float(seconds)
+                elif ratio is not None:
+                    pos = float(ratio) * (self.duration or 0.0)
+                else:
+                    self.error = "missing seek target"
+                    return False
+            except (TypeError, ValueError):
+                self.error = "bad seek target"
+                return False
+            if pos < 0:
+                pos = 0.0
+            if self.duration > 0:
+                pos = min(pos, max(0.0, self.duration - 0.15))
+            return self._play_locked(start=pos)
+
+    def _pause_locked(self):
+        try:
+            self.hold = self._position_locked()
+            os.killpg(os.getpgid(self.proc.pid), signal.SIGSTOP)
+        except Exception as exc:
+            self.error = str(exc)
+            return False
+        self.paused = True
+        self.rms = 0.0
+        self.error = ""
+        return True
+
+    def _resume_locked(self):
+        try:
+            os.killpg(os.getpgid(self.proc.pid), signal.SIGCONT)
+        except Exception as exc:
+            self.error = str(exc)
+            return False
+        self.t0 = time.monotonic() - (self.hold - self.offset)
+        self.paused = False
+        self.rms = 0.15
+        self.error = ""
+        return True
 
     def set_genre(self, index, genre):
         with self.lock:
@@ -263,6 +419,7 @@ class Jukebox:
             name = os.path.relpath(path, MUSIC_DIR)
             if self.track == path:
                 self._stop_locked()
+            self.durations.pop(path, None)
             try:
                 os.remove(path)
             except Exception as exc:
@@ -285,20 +442,31 @@ class Jukebox:
             self.error = ""
             return True
 
-    def _play_locked(self):
+    def _play_locked(self, start=0.0):
         tracks = self.tracks()
         if not tracks:
             self.error = "no tracks in /data/music"
             return False
         self.index %= len(tracks)
         path = tracks[self.index]
+        try:
+            start = float(start or 0.0)
+        except (TypeError, ValueError):
+            start = 0.0
+        if start < 0:
+            start = 0.0
+        self.duration = self._probe_duration(path)
+        if self.duration and start >= max(0.0, self.duration - 0.2):
+            start = 0.0
+        keep_hold = start
         self._stop_locked()
         gain = max(0.0, min(1.0, self.volume / 100.0))
+        ss = "-ss %.3f " % start if start > 0.04 else ""
         cmd = (
-            "ffmpeg -nostdin -hide_banner -nostats -loglevel info -i %s "
+            "ffmpeg -nostdin -hide_banner -nostats -loglevel info -progress pipe:2 %s-i %s "
             "-filter:a volume=%s,astats=length=0.05:metadata=1:reset=1 "
             "-ac 2 -ar 48000 -f wav - | paplay"
-            % (shlex.quote(path), gain)
+            % (ss, shlex.quote(path), gain)
         )
         try:
             self.proc = subprocess.Popen(
@@ -315,6 +483,10 @@ class Jukebox:
             return False
         threading.Thread(target=self._meter, args=(self.proc,), daemon=True).start()
         self.track = path
+        self.offset = start
+        self.hold = keep_hold
+        self.t0 = time.monotonic()
+        self.paused = False
         self.error = ""
         self.rms = 0.15
         return True
@@ -326,11 +498,21 @@ class Jukebox:
                 if not line:
                     break
                 text = line.decode("utf-8", "replace")
+                dur = DUR_RE.search(text)
+                out = OUT_RE.search(text)
                 match = RMS_RE.search(text)
-                if match:
-                    db = float(match.group(1))
-                    amp = max(0.0, min(1.0, (db + 50.0) / 50.0))
-                    with self.lock:
+                with self.lock:
+                    if self.proc is not proc:
+                        continue
+                    if dur and self.duration <= 0:
+                        self.duration = _hms(dur)
+                        self.durations[self.track] = self.duration
+                    if out and not self.paused:
+                        elapsed = _hms(out)
+                        self.t0 = time.monotonic() - elapsed
+                    if match:
+                        db = float(match.group(1))
+                        amp = max(0.0, min(1.0, (db + 50.0) / 50.0))
                         self.rms = amp
         except Exception:
             pass
@@ -338,6 +520,11 @@ class Jukebox:
             if self.proc is proc:
                 self.proc = None
                 self.rms = 0.0
+                self.paused = False
+                if self.duration:
+                    self.hold = self.duration
+                else:
+                    self.hold = self.offset + max(0.0, time.monotonic() - self.t0)
 
 
 PLAYER = Jukebox()
@@ -484,6 +671,14 @@ class Handler(SimpleHTTPRequestHandler):
         data = _read_json(self)
         if path == "/api/play":
             ok = PLAYER.play(index=data.get("index"))
+            _json(self, PLAYER.snapshot(), 200 if ok else 409)
+            return
+        if path == "/api/pause":
+            ok = PLAYER.pause()
+            _json(self, PLAYER.snapshot(), 200 if ok else 409)
+            return
+        if path == "/api/seek":
+            ok = PLAYER.seek(seconds=data.get("seconds"), ratio=data.get("ratio"))
             _json(self, PLAYER.snapshot(), 200 if ok else 409)
             return
         if path == "/api/stop":

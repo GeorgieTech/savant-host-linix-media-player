@@ -229,7 +229,8 @@
       color: var(--cyan);
       background: rgba(4, 8, 10, 0.45);
     }
-    .chip.live { color: var(--amber); border-color: rgba(255, 154, 60, 0.55); }
+    .chip.live, .chip.pause { color: var(--amber); border-color: rgba(255, 154, 60, 0.55); }
+    .chip.pause { color: #ffd27a; }
     .center {
       display: flex;
       flex-direction: column;
@@ -254,6 +255,78 @@
     }
     .meta { color: var(--mute); font-size: 0.85rem; min-height: 1.2em; }
     .err { color: var(--danger); }
+    .seek {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      width: min(540px, 94%);
+      margin: 0.85rem auto 0;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.08em;
+      font-size: 0.72rem;
+      color: var(--mute);
+    }
+    .scrub {
+      position: relative;
+      flex: 1;
+      height: 18px;
+      display: flex;
+      align-items: center;
+    }
+    .scrub-track {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 4px;
+      border-radius: 99px;
+      background: rgba(77, 255, 210, 0.14);
+      pointer-events: none;
+    }
+    .scrub-fill {
+      height: 100%;
+      width: 0;
+      border-radius: 99px;
+      background: linear-gradient(90deg, var(--cyan), var(--amber));
+      box-shadow: 0 0 10px rgba(255, 154, 60, 0.35);
+    }
+    .seek input[type=range] {
+      position: relative;
+      width: 100%;
+      height: 18px;
+      margin: 0;
+      background: transparent;
+      accent-color: var(--amber);
+      z-index: 1;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+    .seek input[type=range]::-webkit-slider-runnable-track {
+      height: 4px;
+      background: transparent;
+    }
+    .seek input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--amber);
+      border: 0;
+      margin-top: -4px;
+      box-shadow: 0 0 8px rgba(255, 154, 60, 0.7);
+    }
+    .seek input[type=range]::-moz-range-track {
+      height: 4px;
+      background: transparent;
+      border: 0;
+    }
+    .seek input[type=range]::-moz-range-thumb {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--amber);
+      border: 0;
+      box-shadow: 0 0 8px rgba(255, 154, 60, 0.7);
+    }
     .controls {
       display: flex;
       flex-wrap: wrap;
@@ -276,6 +349,7 @@
       box-shadow: 0 0 16px rgba(77, 255, 210, 0.08);
     }
     button:hover { background: var(--cyan-dim); }
+    button:disabled { opacity: 0.35; cursor: default; box-shadow: none; }
     button.primary {
       background: var(--cyan);
       color: #03110c;
@@ -329,8 +403,17 @@
         <div class="now-label">Now playing</div>
         <div class="now" id="track">—</div>
         <div class="meta" id="player-sub">linking host</div>
+        <div class="seek" id="seek-wrap">
+          <span id="t-now">0:00</span>
+          <div class="scrub">
+            <div class="scrub-track"><div class="scrub-fill" id="scrub-fill"></div></div>
+            <input id="scrub" type="range" min="0" max="1000" value="0" aria-label="Seek">
+          </div>
+          <span id="t-end">0:00</span>
+        </div>
         <div class="controls">
           <button class="primary" id="btn-play" type="button">Play</button>
+          <button id="btn-pause" type="button">Pause</button>
           <button id="btn-stop" type="button">Stop</button>
           <button id="btn-next" type="button">Next</button>
           <label class="vol">Vol
@@ -367,7 +450,11 @@
     </div>
   </div>
   <script>
-    const state = { playing: false, rms: 0, volume: 80, bins: new Float32Array(72), filter: "", lastPlayer: null };
+    const state = {
+      playing: false, paused: false, rms: 0, volume: 80,
+      position: 0, duration: 0, posAt: 0, scrubbing: false,
+      bins: new Float32Array(72), filter: "", lastPlayer: null
+    };
     const canvas = document.getElementById("viz");
     const ctx = canvas.getContext("2d");
     let w = 0, h = 0, dpr = 1;
@@ -452,10 +539,27 @@
       ctx.strokeStyle = "rgba(77,255,210,0.85)";
       ctx.lineWidth = 2;
       ctx.stroke();
+
+      const frac = state.duration > 0 ? Math.max(0, Math.min(1, livePos() / state.duration)) : 0;
+      if (frac > 0) {
+        const ring = radius * 0.18 + energy * 18 + 11;
+        ctx.beginPath();
+        ctx.strokeStyle = "rgba(77,255,210,0.16)";
+        ctx.lineWidth = 3;
+        ctx.arc(cx, cy, ring, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.strokeStyle = "rgba(255,154,60,0.95)";
+        ctx.lineWidth = 3;
+        ctx.arc(cx, cy, ring, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
+        ctx.stroke();
+      }
+
       ctx.beginPath();
       ctx.arc(cx, cy, 3 + energy * 10, 0, Math.PI * 2);
       ctx.fillStyle = state.playing ? "rgba(255,154,60,0.95)" : "rgba(77,255,210,0.5)";
       ctx.fill();
+      paintSeek();
 
       requestAnimationFrame(tick);
     }
@@ -474,20 +578,21 @@
           ? fmtBytes(d.mem.used) + " / " + fmtBytes(d.mem.total)
           : "—";
         const p = d.player || {};
-        state.playing = !!p.playing;
-        state.rms = typeof p.rms === "number" ? p.rms : 0;
-        state.volume = typeof p.volume === "number" ? p.volume : state.volume;
+        applyPlayer(p);
         const chip = document.getElementById("chip");
-        chip.textContent = state.playing ? "LIVE" : "STANDBY";
-        chip.className = "chip" + (state.playing ? " live" : "");
+        chip.textContent = state.playing ? "LIVE" : (state.paused ? "PAUSED" : "STANDBY");
+        chip.className = "chip" + (state.playing ? " live" : (state.paused ? " pause" : ""));
         document.getElementById("track").textContent = prettyName(p.track) || "No media";
         const sub = document.getElementById("player-sub");
         sub.className = "meta" + (p.error ? " err" : "");
         sub.textContent = p.error
           ? p.error
           : ((p.tracks && p.tracks.length)
-            ? (state.playing ? "decode · paplay · spdif" : "library " + p.tracks.length)
+            ? (state.playing ? "decode · paplay · spdif" : (state.paused ? "paused" : "library " + p.tracks.length))
             : "empty /data/music");
+        const pauseBtn = document.getElementById("btn-pause");
+        pauseBtn.textContent = state.paused ? "Resume" : "Pause";
+        pauseBtn.disabled = !state.playing && !state.paused;
         if (typeof p.volume === "number" && document.activeElement !== document.getElementById("vol")) {
           document.getElementById("vol").value = p.volume;
           document.getElementById("vol-label").textContent = p.volume;
@@ -504,6 +609,43 @@
     function prettyName(path) {
       const base = (path || "").split("/").pop() || path || "";
       return base.replace(/\.[^.]+$/, "");
+    }
+    function fmtTime(sec) {
+      if (sec == null || !isFinite(sec) || sec < 0) return "0:00";
+      sec = Math.floor(sec);
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = sec % 60;
+      if (h) return h + ":" + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+      return m + ":" + String(s).padStart(2, "0");
+    }
+    function livePos() {
+      let pos = state.position || 0;
+      if (state.playing && !state.scrubbing) {
+        pos += (performance.now() - (state.posAt || performance.now())) / 1000;
+      }
+      if (state.duration > 0) pos = Math.min(pos, state.duration);
+      return Math.max(0, pos);
+    }
+    function applyPlayer(p) {
+      state.playing = !!p.playing;
+      state.paused = !!p.paused;
+      state.rms = typeof p.rms === "number" ? p.rms : 0;
+      state.volume = typeof p.volume === "number" ? p.volume : state.volume;
+      if (typeof p.position === "number") state.position = p.position;
+      if (typeof p.duration === "number") state.duration = p.duration;
+      state.posAt = performance.now();
+      paintSeek();
+    }
+    function paintSeek() {
+      if (state.scrubbing) return;
+      const pos = livePos();
+      const dur = state.duration || 0;
+      const frac = dur > 0 ? pos / dur : 0;
+      document.getElementById("t-now").textContent = fmtTime(pos);
+      document.getElementById("t-end").textContent = fmtTime(dur);
+      document.getElementById("scrub").value = Math.round(frac * 1000);
+      document.getElementById("scrub-fill").style.width = (frac * 100) + "%";
     }
     function renderList(p) {
       const box = document.getElementById("pane-lib");
@@ -619,8 +761,30 @@
       refresh();
     }
     document.getElementById("btn-play").onclick = () => post("/api/play");
+    document.getElementById("btn-pause").onclick = () => {
+      if (state.paused) post("/api/play");
+      else post("/api/pause");
+    };
     document.getElementById("btn-stop").onclick = () => post("/api/stop");
     document.getElementById("btn-next").onclick = () => post("/api/next");
+    const scrub = document.getElementById("scrub");
+    scrub.oninput = () => {
+      state.scrubbing = true;
+      const dur = state.duration || 0;
+      const pos = dur * (Number(scrub.value) / 1000);
+      document.getElementById("t-now").textContent = fmtTime(pos);
+      document.getElementById("scrub-fill").style.width = (Number(scrub.value) / 10) + "%";
+    };
+    function commitSeek() {
+      const dur = state.duration || 0;
+      const pos = dur * (Number(scrub.value) / 1000);
+      state.position = pos;
+      state.posAt = performance.now();
+      state.scrubbing = false;
+      if (dur > 0) post("/api/seek", { seconds: pos });
+    }
+    scrub.onchange = commitSeek;
+    scrub.onkeyup = (ev) => { if (ev.key === "Enter") commitSeek(); };
     document.getElementById("vol").oninput = (ev) => {
       document.getElementById("vol-label").textContent = ev.target.value;
     };
@@ -645,9 +809,7 @@
         const r = await fetch("/api/player", { cache: "no-store" });
         if (!r.ok) return;
         const p = await r.json();
-        state.playing = !!p.playing;
-        state.rms = typeof p.rms === "number" ? p.rms : 0;
-        state.volume = typeof p.volume === "number" ? p.volume : state.volume;
+        applyPlayer(p);
       } catch (_e) {}
     }
     refresh();
