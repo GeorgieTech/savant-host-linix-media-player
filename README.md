@@ -13,7 +13,7 @@ This project is **not affiliated with Savant Systems**. The hardware is a former
 - Browser on the LAN: Play, Stop, software volume, Next
 - No cloud, no Savant app, no extra daemon if we can avoid it
 
-## Current status
+## Current status — V0.1
 
 Target host: **192.168.1.180** (`sav-001aae073afe0000`)
 
@@ -21,9 +21,10 @@ Target host: **192.168.1.180** (`sav-001aae073afe0000`)
 |---|---|
 | Savant `startupManager` | Stopped, systemd unit **masked** |
 | Boot target | `multi-user.target` |
-| Web UI | Live at [http://192.168.1.180/](http://192.168.1.180/) |
-| Code on host | `/data/www` (`index.html`, `server.py`) |
-| Jukebox playback | Not wired yet (this is the next build) |
+| Web UI | [http://192.168.1.180/](http://192.168.1.180/) — Play / Stop / Next / volume |
+| Code on host | `/data/www` |
+| Library | `/data/music` (demo track: `Saxophones getting louder.opus`) |
+| Playback | `ffmpeg` decode → `paplay` (PulseAudio, S/PDIF sink on this board) |
 
 Source of truth for the running page is `host-webui/` in this repo.
 

@@ -20,7 +20,7 @@ browser  --HTTP-->  python3 server.py :80
                          +-- GET /api/player now playing, queue
                          +-- POST /api/play|/stop|/next|/volume
                          |
-                         +-- child: mpg123 | flac|aplay | mpv
+                         +-- child: ffmpeg | paplay   (V0.1)
 ```
 
 Only one decoder child at a time. Stop = kill the child. Next = kill, start the next file.
@@ -33,17 +33,21 @@ Only one decoder child at a time. Stop = kill the child. Next = kill, start the 
   something.flac
 ```
 
-Scan on demand (or at start) for `.mp3` / `.flac`. Sort by path. Queue is that list in order unless we add shuffle later.
+Scan on demand for `.mp3` `.flac` `.opus` `.ogg` `.wav` `.m4a`. Sort by path. Queue is that list in order unless we add shuffle later. V0.1 ships one demo file: `Saxophones getting louder.opus`.
 
 `/data` is the 3.1 GB persistent partition. Leave headroom; a few hundred albums of MP3 is the right scale, not a FLAC archive of the whole collection.
 
-## Players (in order)
+## Players
 
-1. **MP3** — `mpg123` or `mpg321` if present (`which mpg123`).
-2. **FLAC** — `flac -d -c file.flac | aplay -t wav -`.
-3. **Anything else** — `/data/opt/mpv` or `/data/opt/ffmpeg` (static **linux-armv7**). Drop-in only; do not try to `apt` on this Yocto image.
+V0.1 uses binaries already on the 9.4.6 image:
 
-If none of the tools exist, the API returns a clear error. The UI does not pretend it is playing.
+- **Decode:** `/usr/bin/ffmpeg` 4.2.2 (includes Opus)
+- **Output:** `/usr/bin/paplay` → PulseAudio system daemon
+- **Hardware sink:** S/PDIF only (`imx-spdif`). There is no analog headphone ALSA device on this board.
+
+Pipeline: `ffmpeg -i file -filter:a volume=N -f wav - | paplay`
+
+`mpg123` / `flac` are not installed. Do not `apt` on this Yocto image. Optional later: drop static **linux-armv7** `mpv` into `/data/opt`.
 
 ## Volume
 

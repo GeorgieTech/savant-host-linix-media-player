@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 import json
 import os
+import shlex
+import signal
 import socket
 import subprocess
 import sys
+import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("WEBUI_PORT", "80"))
+MUSIC_DIR = os.environ.get("MUSIC_DIR", "/data/music")
+AUDIO_EXTS = {".mp3", ".flac", ".opus", ".ogg", ".wav", ".m4a", ".aac"}
 
 
 def _cmd(args):
@@ -58,8 +63,152 @@ def ipv4():
 
 
 def savant_running():
-    out = _cmd(["pgrep", "-f", "startupManager"])
+    out = _cmd(["pgrep", "-x", "startupManager"])
     return bool(out)
+
+
+class Jukebox:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.proc = None
+        self.index = 0
+        self.volume = 80
+        self.error = ""
+        self.track = None
+
+    def tracks(self):
+        found = []
+        if not os.path.isdir(MUSIC_DIR):
+            return found
+        for root, _dirs, names in os.walk(MUSIC_DIR):
+            for name in names:
+                ext = os.path.splitext(name)[1].lower()
+                if ext in AUDIO_EXTS:
+                    found.append(os.path.join(root, name))
+        found.sort()
+        return found
+
+    def _alive(self):
+        return self.proc is not None and self.proc.poll() is None
+
+    def snapshot(self):
+        with self.lock:
+            tracks = self.tracks()
+            if self.proc is not None and self.proc.poll() is not None:
+                self.proc = None
+            names = [os.path.relpath(p, MUSIC_DIR) for p in tracks]
+            current = None
+            if tracks:
+                self.index %= len(tracks)
+                current = os.path.relpath(tracks[self.index], MUSIC_DIR)
+            return {
+                "playing": self._alive(),
+                "track": current,
+                "tracks": names,
+                "volume": self.volume,
+                "error": self.error,
+                "backend": "ffmpeg | paplay",
+            }
+
+    def stop(self):
+        with self.lock:
+            self._stop_locked()
+            self.error = ""
+            return True
+
+    def _stop_locked(self):
+        if self.proc is None:
+            return
+        try:
+            os.killpg(os.getpgid(self.proc.pid), signal.SIGTERM)
+        except Exception:
+            try:
+                self.proc.terminate()
+            except Exception:
+                pass
+        try:
+            self.proc.wait(timeout=2)
+        except Exception:
+            try:
+                os.killpg(os.getpgid(self.proc.pid), signal.SIGKILL)
+            except Exception:
+                pass
+        self.proc = None
+
+    def set_volume(self, value):
+        try:
+            vol = int(value)
+        except (TypeError, ValueError):
+            return False
+        vol = max(0, min(100, vol))
+        with self.lock:
+            restart = self._alive()
+            self.volume = vol
+            if restart:
+                return self._play_locked()
+        return True
+
+    def next_track(self):
+        with self.lock:
+            tracks = self.tracks()
+            if not tracks:
+                self.error = "no tracks in /data/music"
+                return False
+            self.index = (self.index + 1) % len(tracks)
+            return self._play_locked()
+
+    def play(self):
+        with self.lock:
+            return self._play_locked()
+
+    def _play_locked(self):
+        tracks = self.tracks()
+        if not tracks:
+            self.error = "no tracks in /data/music"
+            return False
+        self.index %= len(tracks)
+        path = tracks[self.index]
+        self._stop_locked()
+        gain = max(0.0, min(1.0, self.volume / 100.0))
+        cmd = (
+            "ffmpeg -nostdin -hide_banner -loglevel error -i %s "
+            "-filter:a volume=%s -ac 2 -ar 48000 -f wav - | paplay"
+            % (shlex.quote(path), gain)
+        )
+        try:
+            self.proc = subprocess.Popen(
+                cmd,
+                shell=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                preexec_fn=os.setsid,
+            )
+        except Exception as exc:
+            self.error = str(exc)
+            self.proc = None
+            return False
+        threading.Timer(0.4, self._check_start, args=(path,)).start()
+        self.track = path
+        self.error = ""
+        return True
+
+    def _check_start(self, path):
+        with self.lock:
+            if self.proc is None:
+                return
+            code = self.proc.poll()
+            if code is None:
+                return
+            err = ""
+            try:
+                err = (self.proc.stderr.read() or b"").decode("utf-8", "replace").strip()
+            except Exception:
+                pass
+            self.error = err or ("player exited %s" % code)
+            self.proc = None
+
+
+PLAYER = Jukebox()
 
 
 def status():
@@ -71,7 +220,7 @@ def status():
             load = " ".join(parts[:3])
     except Exception:
         pass
-    return {
+    body = {
         "hostname": socket.gethostname(),
         "ip": ipv4(),
         "uptime": uptime,
@@ -79,7 +228,30 @@ def status():
         "mem": meminfo(),
         "disk": disk_usage("/data"),
         "savant_running": savant_running(),
+        "player": PLAYER.snapshot(),
     }
+    return body
+
+
+def _json(handler, payload, code=200):
+    body = json.dumps(payload).encode("utf-8")
+    handler.send_response(code)
+    handler.send_header("Content-Type", "application/json")
+    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
+def _read_json(handler):
+    length = int(handler.headers.get("Content-Length") or 0)
+    if length <= 0:
+        return {}
+    raw = handler.rfile.read(length)
+    try:
+        return json.loads(raw.decode("utf-8") or "{}")
+    except Exception:
+        return {}
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -90,19 +262,43 @@ class Handler(SimpleHTTPRequestHandler):
         sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
 
     def do_GET(self):
-        if self.path.split("?", 1)[0] == "/api/status":
-            body = json.dumps(status()).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+        path = self.path.split("?", 1)[0]
+        if path == "/api/status":
+            _json(self, status())
+            return
+        if path == "/api/player":
+            _json(self, PLAYER.snapshot())
             return
         return super().do_GET()
 
+    def do_POST(self):
+        path = self.path.split("?", 1)[0]
+        data = _read_json(self)
+        if path == "/api/play":
+            ok = PLAYER.play()
+            _json(self, PLAYER.snapshot(), 200 if ok else 409)
+            return
+        if path == "/api/stop":
+            PLAYER.stop()
+            _json(self, PLAYER.snapshot())
+            return
+        if path == "/api/next":
+            ok = PLAYER.next_track()
+            _json(self, PLAYER.snapshot(), 200 if ok else 409)
+            return
+        if path == "/api/volume":
+            ok = PLAYER.set_volume(data.get("volume"))
+            _json(self, PLAYER.snapshot(), 200 if ok else 400)
+            return
+        _json(self, {"error": "not found"}, 404)
+
 
 if __name__ == "__main__":
+    os.makedirs(MUSIC_DIR, exist_ok=True)
     httpd = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
-    print("host-webui listening on 0.0.0.0:%s serving %s" % (PORT, ROOT), flush=True)
+    print(
+        "host-webui listening on 0.0.0.0:%s serving %s music=%s"
+        % (PORT, ROOT, MUSIC_DIR),
+        flush=True,
+    )
     httpd.serve_forever()
