@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
+import cgi
 import json
 import os
 import re
 import shlex
+import shutil
 import signal
 import socket
 import subprocess
@@ -15,6 +17,7 @@ PORT = int(os.environ.get("WEBUI_PORT", "80"))
 MUSIC_DIR = os.environ.get("MUSIC_DIR", "/data/music")
 AUDIO_EXTS = {".mp3", ".flac", ".opus", ".ogg", ".wav", ".m4a", ".aac"}
 RMS_RE = re.compile(r"RMS(?:_level| level dB:)\s*=?\s*(-?[\d.]+)")
+MAX_UPLOAD = 90 * 1024 * 1024
 
 
 def _cmd(args):
@@ -279,6 +282,74 @@ def _read_json(handler):
         return {}
 
 
+def _safe_music_name(name):
+    name = os.path.basename((name or "").replace("\\", "/").strip())
+    if not name or name in (".", "..") or ".." in name:
+        return None
+    ext = os.path.splitext(name)[1].lower()
+    if ext not in AUDIO_EXTS:
+        return None
+    return name
+
+
+def save_uploads(handler):
+    length = int(handler.headers.get("Content-Length") or 0)
+    disk = disk_usage("/data")
+    if disk and length > max(0, disk["total"] - disk["used"] - 40 * 1024 * 1024):
+        return None, "not enough free space on /data"
+    if length > MAX_UPLOAD * 8:
+        return None, "upload too large"
+    form = cgi.FieldStorage(
+        fp=handler.rfile,
+        headers=handler.headers,
+        environ={
+            "REQUEST_METHOD": "POST",
+            "CONTENT_TYPE": handler.headers.get("Content-Type", ""),
+            "CONTENT_LENGTH": str(length),
+        },
+        keep_blank_values=True,
+    )
+    if "file" not in form:
+        return None, "no file field"
+    raw = form["file"]
+    items = raw if isinstance(raw, list) else [raw]
+    saved = []
+    errors = []
+    os.makedirs(MUSIC_DIR, exist_ok=True)
+    for item in items:
+        filename = getattr(item, "filename", None)
+        if not filename:
+            continue
+        name = _safe_music_name(filename)
+        if not name:
+            errors.append("rejected %s" % os.path.basename(filename))
+            continue
+        dest = os.path.join(MUSIC_DIR, name)
+        tmp = dest + ".part"
+        try:
+            with open(tmp, "wb") as out:
+                shutil.copyfileobj(item.file, out)
+                size = out.tell()
+            if size == 0:
+                os.remove(tmp)
+                errors.append("%s empty" % name)
+                continue
+            if size > MAX_UPLOAD:
+                os.remove(tmp)
+                errors.append("%s exceeds 90 MB" % name)
+                continue
+            os.replace(tmp, dest)
+            saved.append({"name": name, "bytes": size})
+        except Exception as exc:
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except Exception:
+                pass
+            errors.append("%s: %s" % (name, exc))
+    return {"saved": saved, "errors": errors, "player": PLAYER.snapshot(), "disk": disk_usage("/data")}, None
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=ROOT, **kwargs)
@@ -298,6 +369,14 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.split("?", 1)[0]
+        if path == "/api/upload":
+            payload, err = save_uploads(self)
+            if err:
+                _json(self, {"error": err}, 400)
+                return
+            code = 200 if payload.get("saved") else 400
+            _json(self, payload, code)
+            return
         data = _read_json(self)
         if path == "/api/play":
             ok = PLAYER.play(index=data.get("index"))

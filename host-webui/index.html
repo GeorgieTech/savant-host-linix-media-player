@@ -77,6 +77,56 @@
       letter-spacing: 0.12em;
       margin-right: 0.45rem;
     }
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      background: rgba(4, 10, 12, 0.92);
+      z-index: 1;
+    }
+    .tabs button {
+      flex: 1;
+      min-width: 0;
+      letter-spacing: 0.16em;
+      font-size: 0.62rem;
+      padding: 0.55rem 0.3rem;
+      border: 0;
+      box-shadow: none;
+      border-bottom: 1px solid transparent;
+    }
+    .tabs button.on {
+      color: var(--amber);
+      border-bottom-color: var(--amber);
+    }
+    .drop {
+      margin: 0.8rem 0.7rem;
+      padding: 1.1rem 0.8rem;
+      border: 1px dashed var(--line);
+      text-align: center;
+      color: var(--mute);
+      font-size: 0.8rem;
+      letter-spacing: 0.04em;
+    }
+    .drop.hot { border-color: var(--amber); color: var(--amber); }
+    .drop input { display: none; }
+    .upload-log {
+      margin: 0 0.7rem 0.8rem;
+      font-size: 0.75rem;
+      color: var(--mute);
+      min-height: 1.2em;
+    }
+    .bar {
+      margin: 0.6rem 0.7rem 0;
+      height: 3px;
+      background: rgba(77,255,210,0.12);
+    }
+    .bar > span {
+      display: block;
+      height: 100%;
+      width: 0;
+      background: var(--cyan);
+    }
     canvas#viz {
       position: fixed;
       inset: 0;
@@ -245,8 +295,19 @@
           </label>
         </div>
       </div>
-      <aside class="playlist" id="playlist">
-        <h2>Library</h2>
+      <aside class="playlist">
+        <div class="tabs">
+          <button type="button" class="on" id="tab-lib">Library</button>
+          <button type="button" id="tab-up">Upload</button>
+        </div>
+        <div id="pane-lib"></div>
+        <div id="pane-up" hidden>
+          <label class="drop" id="drop">Drop opus / mp3 / flac here
+            <input id="file" type="file" accept=".opus,.mp3,.flac,.ogg,.wav,.m4a,.aac,audio/*" multiple>
+          </label>
+          <div class="bar"><span id="prog"></span></div>
+          <div class="upload-log" id="uplog">Files land in /data/music</div>
+        </div>
       </aside>
     </div>
     <div class="bottom">
@@ -397,13 +458,13 @@
       return base.replace(/\.[^.]+$/, "");
     }
     function renderList(p) {
-      const box = document.getElementById("playlist");
+      const box = document.getElementById("pane-lib");
       const tracks = p.tracks || [];
       const idx = typeof p.index === "number" ? p.index : -1;
       const sig = tracks.length + ":" + idx + ":" + (p.playing ? "1" : "0");
       if (box.dataset.sig === sig) return;
       box.dataset.sig = sig;
-      box.innerHTML = "<h2>Library · " + tracks.length + "</h2>";
+      box.innerHTML = "";
       tracks.forEach((name, i) => {
         const btn = document.createElement("button");
         btn.type = "button";
@@ -414,6 +475,46 @@
       });
       const active = box.querySelector(".row.active");
       if (active) active.scrollIntoView({ block: "nearest" });
+    }
+    function showTab(which) {
+      const lib = which === "lib";
+      document.getElementById("tab-lib").classList.toggle("on", lib);
+      document.getElementById("tab-up").classList.toggle("on", !lib);
+      document.getElementById("pane-lib").hidden = !lib;
+      document.getElementById("pane-up").hidden = lib;
+    }
+    function uploadFiles(fileList) {
+      const files = Array.from(fileList || []);
+      if (!files.length) return;
+      const fd = new FormData();
+      files.forEach((f) => fd.append("file", f, f.name));
+      const xhr = new XMLHttpRequest();
+      const log = document.getElementById("uplog");
+      const bar = document.getElementById("prog");
+      log.textContent = "Sending " + files.length + " file" + (files.length > 1 ? "s" : "") + "…";
+      bar.style.width = "0%";
+      xhr.upload.onprogress = (ev) => {
+        if (!ev.lengthComputable) return;
+        bar.style.width = Math.round((ev.loaded / ev.total) * 100) + "%";
+      };
+      xhr.onload = () => {
+        let msg = xhr.responseText;
+        try {
+          const d = JSON.parse(xhr.responseText);
+          const n = (d.saved || []).length;
+          const err = (d.errors || []).join("; ");
+          msg = n ? ("Saved " + n) : "Nothing saved";
+          if (err) msg += " · " + err;
+          if (d.error) msg = d.error;
+        } catch (_e) {}
+        log.textContent = msg;
+        bar.style.width = "100%";
+        document.getElementById("pane-lib").dataset.sig = "";
+        refresh();
+      };
+      xhr.onerror = () => { log.textContent = "upload failed"; };
+      xhr.open("POST", "/api/upload");
+      xhr.send(fd);
     }
     async function post(path, body) {
       await fetch(path, {
@@ -431,6 +532,18 @@
     };
     document.getElementById("vol").onchange = (ev) => {
       post("/api/volume", { volume: Number(ev.target.value) });
+    };
+    document.getElementById("tab-lib").onclick = () => showTab("lib");
+    document.getElementById("tab-up").onclick = () => showTab("up");
+    const drop = document.getElementById("drop");
+    const file = document.getElementById("file");
+    file.onchange = () => uploadFiles(file.files);
+    drop.ondragover = (ev) => { ev.preventDefault(); drop.classList.add("hot"); };
+    drop.ondragleave = () => drop.classList.remove("hot");
+    drop.ondrop = (ev) => {
+      ev.preventDefault();
+      drop.classList.remove("hot");
+      uploadFiles(ev.dataTransfer.files);
     };
     async function pulse() {
       try {
