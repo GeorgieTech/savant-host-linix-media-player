@@ -1,1 +1,1135 @@
-placeholder
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GIGAWATT</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --void: #07080b;
+      --destination: #ff2b2b;
+      --present: #3dff6a;
+      --departed: #ffcc22;
+      --flux: #ff9a1a;
+      --steel: #9aa3ad;
+      --cyan: #3dff6a;
+      --cyan-dim: rgba(61, 255, 106, 0.12);
+      --amber: #ffcc22;
+      --ink: #f3f1ea;
+      --mute: #8b9098;
+      --line: rgba(154, 163, 173, 0.28);
+      --danger: #ff2b2b;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      font-family: "Avenir Next Condensed", "Avenir Next", "Segoe UI", sans-serif;
+      background:
+        radial-gradient(900px 520px at 72% 38%, rgba(255,154,26,0.10), transparent 58%),
+        radial-gradient(1100px 640px at 18% 8%, rgba(126,200,255,0.07), transparent 52%),
+        repeating-linear-gradient(115deg, rgba(255,255,255,0.015) 0 1px, transparent 1px 5px),
+        var(--void);
+      color: var(--ink);
+      overflow: hidden;
+    }
+    .backplate {
+      position: fixed; inset: 0; z-index: 0;
+      background:
+        linear-gradient(180deg, rgba(7,8,11,0.35), rgba(7,8,11,0.72)),
+        url("bg-gigawatt.jpg") center / cover no-repeat;
+      opacity: 0.32;
+      filter: saturate(0.75) contrast(1.12);
+      pointer-events: none;
+    }
+    .flash {
+      position: fixed; inset: 0; z-index: 8;
+      pointer-events: none;
+      background: radial-gradient(circle at 30% 20%, rgba(180,220,255,0.55), rgba(7,8,11,0) 55%);
+      opacity: 0;
+      transition: opacity 80ms linear;
+    }
+    .flash.on { opacity: 1; }
+    .stage {
+      display: grid;
+      grid-template-columns: 1fr minmax(260px, 400px);
+      gap: 1rem;
+      min-height: 0;
+      align-items: stretch;
+    }
+    .playlist {
+      overflow-y: auto;
+      text-align: left;
+      border: 1px solid var(--line);
+      background: rgba(12, 14, 18, 0.88);
+      min-height: 0;
+    }
+    .playlist h2 {
+      margin: 0;
+      padding: 0.55rem 0.7rem;
+      font-size: 0.65rem;
+      letter-spacing: 0.28em;
+      text-transform: uppercase;
+      color: var(--mute);
+      border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      background: rgba(12, 14, 18, 0.96);
+    }
+    .playlist button.row {
+      display: block;
+      width: 100%;
+      text-align: left;
+      letter-spacing: 0.02em;
+      text-transform: none;
+      min-width: 0;
+      border: 0;
+      border-bottom: 1px solid rgba(154, 163, 173, 0.12);
+      border-radius: 0;
+      box-shadow: none;
+      padding: 0.55rem 0.7rem;
+      background: transparent;
+      color: var(--ink);
+      font-size: 0.82rem;
+    }
+    .playlist button.row:hover { background: var(--cyan-dim); }
+    .playlist button.row.active {
+      color: var(--destination);
+      background: rgba(255, 43, 43, 0.12);
+    }
+    .playlist .num {
+      color: var(--mute);
+      font-size: 0.68rem;
+      letter-spacing: 0.12em;
+      margin-right: 0.45rem;
+    }
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      background: rgba(12, 14, 18, 0.96);
+      z-index: 2;
+    }
+    .tabs button {
+      flex: 1;
+      min-width: 0;
+      letter-spacing: 0.16em;
+      font-size: 0.62rem;
+      padding: 0.55rem 0.3rem;
+      border: 0;
+      box-shadow: none;
+      border-bottom: 1px solid transparent;
+    }
+    .tabs button.on {
+      color: var(--amber);
+      border-bottom-color: var(--amber);
+    }
+    .drop {
+      margin: 0.8rem 0.7rem;
+      padding: 1.1rem 0.8rem;
+      border: 1px dashed var(--line);
+      text-align: center;
+      color: var(--mute);
+      font-size: 0.8rem;
+      letter-spacing: 0.04em;
+    }
+    .drop.hot { border-color: var(--amber); color: var(--amber); }
+    .drop input { display: none; }
+    .upload-log {
+      margin: 0 0.7rem 0.8rem;
+      font-size: 0.75rem;
+      color: var(--mute);
+      min-height: 1.2em;
+    }
+    .bar {
+      margin: 0.6rem 0.7rem 0;
+      height: 3px;
+      background: rgba(255,43,43,0.16);
+    }
+    .bar > span {
+      display: block;
+      height: 100%;
+      width: 0;
+      background: var(--destination);
+    }
+    .filter {
+      display: block;
+      width: calc(100% - 1.4rem);
+      margin: 0.55rem 0.7rem 0.2rem;
+      background: #101218;
+      color: var(--ink);
+      border: 1px solid var(--line);
+      font: inherit;
+      font-size: 0.75rem;
+      padding: 0.35rem 0.4rem;
+    }
+    .mgr {
+      display: grid;
+      grid-template-columns: 1fr 7.2rem 2.1rem;
+      gap: 0.3rem;
+      align-items: center;
+      padding: 0.4rem 0.55rem;
+      border-bottom: 1px solid rgba(154, 163, 173, 0.12);
+    }
+    .mgr .ttl {
+      font-size: 0.75rem;
+      letter-spacing: 0.02em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .mgr select {
+      width: 100%;
+      background: #101218;
+      color: var(--ink);
+      border: 1px solid var(--line);
+      font: inherit;
+      font-size: 0.68rem;
+      padding: 0.25rem 0.2rem;
+    }
+    .mgr .x {
+      min-width: 0;
+      padding: 0.3rem 0;
+      letter-spacing: 0;
+      font-size: 0.85rem;
+      color: var(--danger);
+      border-color: rgba(255, 90, 74, 0.45);
+      box-shadow: none;
+    }
+    canvas#viz {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+    }
+    .grain {
+      position: fixed;
+      inset: 0;
+      z-index: 2;
+      pointer-events: none;
+      opacity: 0.09;
+      background-image: repeating-linear-gradient(
+        0deg,
+        transparent 0,
+        transparent 2px,
+        rgba(0, 0, 0, 0.35) 3px
+      );
+    }
+    .hud {
+      position: relative;
+      z-index: 3;
+      height: 100%;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      padding: 1.1rem 1.25rem 1.2rem;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .top, .bottom {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 1rem;
+    }
+    .top-actions {
+      display: flex;
+      align-items: flex-end;
+      gap: 0.65rem;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .route {
+      display: flex;
+      border: 1px solid var(--line);
+      background: rgba(12, 14, 18, 0.7);
+    }
+    .route button {
+      min-width: 0;
+      padding: 0.38rem 0.7rem;
+      letter-spacing: 0.14em;
+      font-size: 0.62rem;
+      border: 0;
+      box-shadow: none;
+    }
+    audio#deck { display: none; }
+    .set {
+      padding: 0.75rem 0.7rem 1rem;
+      text-align: left;
+    }
+    .set h2 {
+      margin: 0 0 0.45rem;
+      padding: 0;
+      border: 0;
+      font-size: 0.65rem;
+      letter-spacing: 0.28em;
+      text-transform: uppercase;
+      color: var(--mute);
+      background: transparent;
+      position: static;
+    }
+    .set p {
+      margin: 0 0 0.7rem;
+      color: var(--mute);
+      font-size: 0.78rem;
+      line-height: 1.45;
+      letter-spacing: 0.02em;
+    }
+    .set .route { width: 100%; margin: 0.35rem 0 0.8rem; }
+    .set .route button { flex: 1; }
+    .mark {
+      letter-spacing: 0.42em;
+      font-size: 0.68rem;
+      color: var(--present);
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0.2rem 0 0;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      font-size: clamp(1.1rem, 3vw, 1.7rem);
+      text-transform: uppercase;
+    }
+    .chip {
+      border: 1px solid var(--line);
+      padding: 0.35rem 0.55rem;
+      font-size: 0.68rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--present);
+      background: rgba(12, 14, 18, 0.7);
+      font-family: "Share Tech Mono", ui-monospace, monospace;
+    }
+    .chip.live { color: var(--destination); border-color: rgba(255, 43, 43, 0.7); }
+    .chip.pause { color: var(--departed); border-color: rgba(255, 204, 34, 0.55); }
+    .circuits {
+      display: grid;
+      gap: 0.28rem;
+      width: min(540px, 94%);
+      margin: 0.15rem auto 0.85rem;
+      text-align: left;
+    }
+    .circuit {
+      display: grid;
+      grid-template-columns: 9.6rem 1fr auto;
+      gap: 0.55rem;
+      align-items: center;
+      border: 1px solid var(--line);
+      background: rgba(8, 9, 12, 0.82);
+      padding: 0.28rem 0.55rem;
+    }
+    .circuit .lab {
+      font-size: 0.52rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--steel);
+    }
+    .circuit .val {
+      font-family: "Share Tech Mono", ui-monospace, monospace;
+      font-size: 0.92rem;
+      letter-spacing: 0.08em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .circuit .clk {
+      font-family: "Share Tech Mono", ui-monospace, monospace;
+      font-size: 0.8rem;
+      letter-spacing: 0.12em;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .circuit.dest .val, .circuit.dest .clk { color: var(--destination); }
+    .circuit.now .val, .circuit.now .clk { color: var(--present); }
+    .circuit.was .val, .circuit.was .clk { color: var(--departed); }
+    .center {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      padding-bottom: 1.4rem;
+      text-align: center;
+    }
+    .now-label {
+      letter-spacing: 0.34em;
+      font-size: 0.65rem;
+      color: var(--mute);
+      text-transform: uppercase;
+    }
+    .now {
+      margin: 0.35rem 0 0.2rem;
+      font-size: clamp(1.2rem, 3.4vw, 2rem);
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      max-width: 90vw;
+      text-shadow: 0 0 24px rgba(255, 43, 43, 0.28);
+    }
+    .meta { color: var(--mute); font-size: 0.85rem; min-height: 1.2em; }
+    .err { color: var(--danger); }
+    .seek {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      width: min(540px, 94%);
+      margin: 0.85rem auto 0;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.08em;
+      font-size: 0.72rem;
+      color: var(--mute);
+    }
+    .scrub {
+      position: relative;
+      flex: 1;
+      height: 18px;
+      display: flex;
+      align-items: center;
+    }
+    .scrub-track {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 4px;
+      border-radius: 99px;
+      background: rgba(255, 43, 43, 0.16);
+      pointer-events: none;
+    }
+    .scrub-fill {
+      height: 100%;
+      width: 0;
+      border-radius: 99px;
+      background: linear-gradient(90deg, var(--destination), var(--departed));
+      box-shadow: 0 0 10px rgba(255, 154, 26, 0.35);
+    }
+    .seek input[type=range] {
+      position: relative;
+      width: 100%;
+      height: 18px;
+      margin: 0;
+      background: transparent;
+      accent-color: var(--amber);
+      z-index: 1;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+    .seek input[type=range]::-webkit-slider-runnable-track {
+      height: 4px;
+      background: transparent;
+    }
+    .seek input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--amber);
+      border: 0;
+      margin-top: -4px;
+      box-shadow: 0 0 8px rgba(255, 154, 26, 0.7);
+    }
+    .seek input[type=range]::-moz-range-track {
+      height: 4px;
+      background: transparent;
+      border: 0;
+    }
+    .seek input[type=range]::-moz-range-thumb {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--amber);
+      border: 0;
+      box-shadow: 0 0 8px rgba(255, 154, 26, 0.7);
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+      justify-content: center;
+      align-items: center;
+      margin-top: 1.15rem;
+    }
+    button {
+      appearance: none;
+      cursor: pointer;
+      border: 1px solid var(--steel);
+      background: transparent;
+      color: var(--ink);
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      font-size: 0.72rem;
+      padding: 0.7rem 1.15rem;
+      min-width: 6.4rem;
+      box-shadow: none;
+      border-radius: 2px;
+    }
+    button:hover { background: rgba(154, 163, 173, 0.12); }
+    button:disabled { opacity: 0.35; cursor: default; box-shadow: none; }
+    button.primary {
+      background: var(--destination);
+      color: #140404;
+      border-color: var(--destination);
+      font-weight: 600;
+    }
+    button.armed {
+      color: var(--departed);
+      border-color: rgba(255, 204, 34, 0.7);
+      background: rgba(255, 204, 34, 0.12);
+    }
+    .vol {
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      font-size: 0.68rem;
+      color: var(--mute);
+      margin-left: 0.4rem;
+    }
+    input[type=range] {
+      width: 150px;
+      accent-color: var(--amber);
+    }
+    .stats {
+      display: flex;
+      gap: 1.2rem;
+      flex-wrap: wrap;
+      color: var(--mute);
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+    }
+    .stats b { color: var(--ink); font-weight: 500; }
+    .remain {
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      gap: 1.4rem;
+    }
+    .remain b {
+      color: var(--departed);
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+    @media (max-width: 860px) {
+      .stats.host-meta { display: none; }
+      body { overflow: auto; }
+      .hud { height: auto; min-height: 100%; }
+      .stage { grid-template-columns: 1fr; }
+      .playlist { max-height: 42vh; }
+    }
+  </style>
+</head>
+<body>
+  <div class="backplate" aria-hidden="true"></div>
+  <canvas id="viz"></canvas>
+  <div class="grain"></div>
+  <div class="flash" id="flash"></div>
+  <div class="hud">
+    <div class="top">
+      <div>
+        <div class="mark">Time circuits</div>
+        <h1 id="title">GIGAWATT</h1>
+      </div>
+      <div class="top-actions">
+        <div class="route" role="group" aria-label="Audio output">
+          <button type="button" id="out-optical">Optical</button>
+          <button type="button" id="out-browser">Browser</button>
+        </div>
+        <div class="chip" id="chip">STANDBY</div>
+      </div>
+    </div>
+    <div class="stage">
+      <div class="center">
+        <div class="circuits" aria-label="Time circuits">
+          <div class="circuit dest">
+            <div class="lab">Destination time</div>
+            <div class="val" id="dest-val">—</div>
+            <div class="clk" id="dest-clk">-- -- ----</div>
+          </div>
+          <div class="circuit now">
+            <div class="lab">Present time</div>
+            <div class="val" id="present-val">—</div>
+            <div class="clk" id="present-clk">-- -- ----</div>
+          </div>
+          <div class="circuit was">
+            <div class="lab">Last time departed</div>
+            <div class="val" id="departed-val">—</div>
+            <div class="clk" id="departed-clk">-- -- ----</div>
+          </div>
+        </div>
+        <div class="now-label">Destination</div>
+        <div class="now" id="track">—</div>
+        <div class="meta" id="player-sub">linking host</div>
+        <div class="seek" id="seek-wrap">
+          <span id="t-now">0:00</span>
+          <div class="scrub">
+            <div class="scrub-track"><div class="scrub-fill" id="scrub-fill"></div></div>
+            <input id="scrub" type="range" min="0" max="1000" value="0" aria-label="Seek">
+          </div>
+          <span id="t-end">0:00</span>
+        </div>
+        <div class="controls">
+          <button class="primary" id="btn-play" type="button">Play</button>
+          <button id="btn-pause" type="button">Pause</button>
+          <button id="btn-stop" type="button">Stop</button>
+          <button id="btn-next" type="button">Next</button>
+          <button id="btn-shuffle" type="button">Shuffle</button>
+          <button id="btn-repeat" type="button">Replay</button>
+          <label class="vol">Power
+            <input id="vol" type="range" min="0" max="100" value="80">
+            <span id="vol-label">80</span>
+          </label>
+        </div>
+      </div>
+      <aside class="playlist">
+        <div class="tabs">
+          <button type="button" class="on" id="tab-lib">Library</button>
+          <button type="button" id="tab-mgr">Manage</button>
+          <button type="button" id="tab-up">Upload</button>
+          <button type="button" id="tab-set">Settings</button>
+        </div>
+        <div id="pane-lib"></div>
+        <div id="pane-mgr" hidden></div>
+        <div id="pane-up" hidden>
+          <label class="drop" id="drop">Drop media on the hood
+            <input id="file" type="file" accept=".opus,.mp3,.flac,.ogg,.wav,.m4a,.aac,audio/*" multiple>
+          </label>
+          <div class="bar"><span id="prog"></span></div>
+          <div class="upload-log" id="uplog">Files land in /data/music</div>
+        </div>
+        <div id="pane-set" hidden>
+          <div class="set">
+            <h2>Audio out</h2>
+            <p>Pick where the queue plays. Optical is the host TOSLINK jack into a preamp. Browser plays on this phone or computer and keeps the optical port silent.</p>
+            <div class="route" role="group" aria-label="Audio output">
+              <button type="button" id="set-optical">Host optical</button>
+              <button type="button" id="set-browser">This browser</button>
+            </div>
+            <p id="set-note">Route: optical</p>
+          </div>
+        </div>
+      </aside>
+    </div>
+    <audio id="deck" preload="metadata"></audio>
+    <div class="bottom">
+      <div class="stats host-meta">
+        <span>HOST <b id="hostname">—</b></span>
+        <span>NET <b id="ip">—</b></span>
+        <span>UP <b id="uptime">—</b></span>
+      </div>
+      <div class="stats remain">
+        <span>RAM left <b id="mem-left">—</b></span>
+        <span>DISK left <b id="disk-left">—</b></span>
+      </div>
+    </div>
+  </div>
+  <script>
+    const state = {
+      playing: false, paused: false, rms: 0, volume: 80,
+      position: 0, duration: 0, posAt: 0, scrubbing: false,
+      shuffle: false, repeat: "off", output: "optical",
+      bins: new Float32Array(72), filter: "", lastPlayer: null,
+      lastTrack: "", departedTrack: "\u2014", departedAt: "\u2014 \u2014 \u2014\u2014"
+    };
+    const canvas = document.getElementById("viz");
+    const ctx = canvas.getContext("2d");
+    const deck = document.getElementById("deck");
+    let audioCtx = null, analyser = null, timeBuf = null;
+    let w = 0, h = 0, dpr = 1;
+    let ending = false;
+    function resize() {
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      w = canvas.clientWidth;
+      h = canvas.clientHeight;
+      canvas.width = Math.floor(w * dpr);
+      canvas.height = Math.floor(h * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    window.addEventListener("resize", resize);
+    resize();
+    function fmtBytes(n) {
+      if (n == null) return "\u2014";
+      const u = ["B", "KB", "MB", "GB"];
+      let i = 0, x = n;
+      while (x >= 1024 && i < u.length - 1) { x /= 1024; i++; }
+      return x.toFixed(i === 0 ? 0 : 1) + " " + u[i];
+    }
+    function noise(i, t) {
+      return 0.5 + 0.5 * Math.sin(i * 0.37 + t * 2.1) * Math.cos(i * 0.11 - t * 1.4);
+    }
+    function tube(x0, y0, x1, y1, color, width) {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
+      ctx.stroke();
+    }
+    function tick(ts) {
+      const t = ts / 1000;
+      const cx = w / 2;
+      const cy = h * 0.40;
+      const rms = state.output === "browser" ? browserRms() : state.rms;
+      const energy = state.playing ? (0.22 + rms * 0.9) * (0.35 + state.volume / 140) : 0.06;
+      const n = state.bins.length;
+      for (let i = 0; i < n; i++) {
+        const target = energy * (0.35 + noise(i, t) * (state.playing ? 1 : 0.25));
+        state.bins[i] += (target - state.bins[i]) * 0.22;
+      }
+      ctx.fillStyle = "rgba(7, 8, 11, 0.22)";
+      ctx.fillRect(0, 0, w, h);
+      const glow = state.playing ? energy : 0.08;
+      const grd = ctx.createRadialGradient(cx, cy, 8, cx, cy, Math.max(w, h) * 0.42);
+      grd.addColorStop(0, "rgba(255,154,26," + (0.06 + glow * 0.22) + ")");
+      grd.addColorStop(0.45, "rgba(255,43,43," + (0.03 + glow * 0.08) + ")");
+      grd.addColorStop(1, "rgba(7,8,11,0)");
+      ctx.fillStyle = grd;
+      ctx.fillRect(0, 0, w, h);
+      const arm = Math.min(w, h) * (0.16 + energy * 0.10);
+      const colors = ["rgba(255,43,43,0.92)", "rgba(61,255,106,0.88)", "rgba(255,204,34,0.90)"];
+      const angs = [-Math.PI / 2, Math.PI / 6 * 5, Math.PI / 6];
+      angs.forEach((a, i) => {
+        const pulse = 0.75 + state.bins[(i * 11) % n] * 0.9;
+        const x1 = cx + Math.cos(a) * arm * pulse;
+        const y1 = cy + Math.sin(a) * arm * pulse;
+        tube(cx, cy, x1, y1, "rgba(20,18,14,0.9)", 16);
+        tube(cx, cy, x1, y1, colors[i], 7 + energy * 6);
+      });
+      ctx.beginPath();
+      ctx.arc(cx, cy, 7 + energy * 10, 0, Math.PI * 2);
+      ctx.fillStyle = state.playing ? "rgba(255,154,26,0.95)" : "rgba(154,163,173,0.45)";
+      ctx.fill();
+      const frac = state.duration > 0 ? Math.max(0, Math.min(1, livePos() / state.duration)) : 0;
+      if (frac > 0) {
+        const ring = arm * 1.18;
+        ctx.beginPath();
+        ctx.strokeStyle = "rgba(255,43,43,0.18)";
+        ctx.lineWidth = 3;
+        ctx.arc(cx, cy, ring, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.strokeStyle = "rgba(255,43,43,0.95)";
+        ctx.lineWidth = 3;
+        ctx.arc(cx, cy, ring, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
+        ctx.stroke();
+      }
+      if (state.playing) {
+        ctx.save();
+        ctx.font = "700 18px \"Share Tech Mono\", monospace";
+        ctx.fillStyle = "rgba(255,43,43,0.85)";
+        ctx.textAlign = "center";
+        ctx.fillText("88", cx, cy + arm + 28);
+        ctx.restore();
+      }
+      paintSeek();
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+    async function refresh() {
+      try {
+        const r = await fetch("/api/status", { cache: "no-store" });
+        if (!r.ok) throw new Error("http " + r.status);
+        const d = await r.json();
+        document.getElementById("title").textContent = "GIGAWATT";
+        document.getElementById("hostname").textContent = d.hostname || "\u2014";
+        document.getElementById("ip").textContent = d.ip || "\u2014";
+        document.getElementById("uptime").textContent = d.uptime || "\u2014";
+        const memFree = d.mem ? (d.mem.free != null ? d.mem.free : Math.max(0, (d.mem.total || 0) - (d.mem.used || 0))) : null;
+        const diskFree = d.disk ? (d.disk.free != null ? d.disk.free : Math.max(0, (d.disk.total || 0) - (d.disk.used || 0))) : null;
+        document.getElementById("mem-left").textContent = memFree != null ? fmtBytes(memFree) : "\u2014";
+        document.getElementById("disk-left").textContent = diskFree != null ? fmtBytes(diskFree) : "\u2014";
+        const p = d.player || {};
+        applyPlayer(p);
+        const chip = document.getElementById("chip");
+        chip.textContent = state.playing ? "88 MPH" : (state.paused ? "HOLD" : "STANDBY");
+        chip.className = "chip" + (state.playing ? " live" : (state.paused ? " pause" : ""));
+        const name = prettyName(p.track) || "No media";
+        document.getElementById("track").textContent = name;
+        paintCircuits(p, d);
+        const sub = document.getElementById("player-sub");
+        sub.className = "meta" + (p.error ? " err" : "");
+        sub.textContent = p.error ? p.error : ((p.tracks && p.tracks.length) ? (state.playing ? (state.output === "browser" ? "this browser" : "decode \u00b7 paplay \u00b7 spdif") : (state.paused ? "paused" : "queue " + p.tracks.length)) + (p.shuffle ? " \u00b7 shuffle" : "") + (p.repeat === "one" ? " \u00b7 replay 1" : (p.repeat === "all" ? " \u00b7 replay all" : "")) : "empty /data/music");
+        const pauseBtn = document.getElementById("btn-pause");
+        pauseBtn.textContent = state.paused ? "Resume" : "Pause";
+        pauseBtn.disabled = !state.playing && !state.paused;
+        document.getElementById("btn-shuffle").classList.toggle("armed", !!p.shuffle);
+        const rep = document.getElementById("btn-repeat");
+        const mode = p.repeat || "off";
+        rep.classList.toggle("armed", mode !== "off");
+        rep.textContent = mode === "one" ? "Replay 1" : (mode === "all" ? "Replay all" : "Replay");
+        if (typeof p.volume === "number" && document.activeElement !== document.getElementById("vol")) {
+          document.getElementById("vol").value = p.volume;
+          document.getElementById("vol-label").textContent = p.volume;
+        }
+        state.lastPlayer = p;
+        paintOutput(state.output);
+        if (state.output === "browser") {
+          if (p.playing) cueDeck(p);
+          else if (p.paused) { deck.pause(); }
+          else stopDeck();
+        } else {
+          stopDeck();
+        }
+        renderList(p);
+        renderManage(p);
+      } catch (err) {
+        document.getElementById("player-sub").textContent = String(err.message || err);
+        document.getElementById("player-sub").className = "meta err";
+      }
+    }
+    function pad2(n) { return String(n).padStart(2, "0"); }
+    function circuitStamp(date) {
+      const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+      const d = date || new Date();
+      return months[d.getMonth()] + " " + pad2(d.getDate()) + " " + d.getFullYear() + "  " + pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+    }
+    function remainStamp(sec) {
+      if (sec == null || !isFinite(sec) || sec < 0) return "-- -- ----";
+      return "T-" + fmtTime(sec);
+    }
+    function flashStorm() {
+      const el = document.getElementById("flash");
+      if (!el) return;
+      el.classList.add("on");
+      setTimeout(() => el.classList.remove("on"), 120);
+    }
+    function paintCircuits(p, d) {
+      const track = prettyName(p.track) || "\u2014";
+      if (state.lastTrack && p.track && state.lastTrack !== p.track) {
+        state.departedTrack = prettyName(state.lastTrack);
+        state.departedAt = circuitStamp(new Date());
+      }
+      if (p.track) state.lastTrack = p.track;
+      const left = (state.duration > 0) ? Math.max(0, state.duration - livePos()) : null;
+      document.getElementById("dest-val").textContent = track;
+      document.getElementById("dest-clk").textContent = state.playing || state.paused ? remainStamp(left) : "OCT 26 1985";
+      document.getElementById("present-val").textContent = (d && d.hostname) || "HOST";
+      document.getElementById("present-clk").textContent = circuitStamp(new Date());
+      document.getElementById("departed-val").textContent = state.departedTrack;
+      document.getElementById("departed-clk").textContent = state.departedAt;
+    }
+    function prettyName(path) {
+      const base = (path || "").split("/").pop() || path || "";
+      return base.replace(/\.[^.]+$/, "");
+    }
+    function fmtTime(sec) {
+      if (sec == null || !isFinite(sec) || sec < 0) return "0:00";
+      sec = Math.floor(sec);
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = sec % 60;
+      if (h) return h + ":" + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+      return m + ":" + String(s).padStart(2, "0");
+    }
+    function livePos() {
+      if (state.output === "browser" && deck && isFinite(deck.currentTime) && (state.playing || state.paused)) {
+        return Math.max(0, deck.currentTime);
+      }
+      let pos = state.position || 0;
+      if (state.playing && !state.scrubbing) {
+        pos += (performance.now() - (state.posAt || performance.now())) / 1000;
+      }
+      if (state.duration > 0) pos = Math.min(pos, state.duration);
+      return Math.max(0, pos);
+    }
+    function browserRms() {
+      if (!analyser || !timeBuf || !state.playing) return 0;
+      analyser.getByteTimeDomainData(timeBuf);
+      let s = 0;
+      for (let i = 0; i < timeBuf.length; i++) {
+        const v = (timeBuf[i] - 128) / 128;
+        s += v * v;
+      }
+      return Math.min(1, Math.sqrt(s / timeBuf.length) * 3.2);
+    }
+    function hookDeck() {
+      if (audioCtx) {
+        if (audioCtx.state === "suspended") audioCtx.resume();
+        return;
+      }
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      audioCtx = new AC();
+      const src = audioCtx.createMediaElementSource(deck);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      timeBuf = new Uint8Array(analyser.fftSize);
+      src.connect(analyser);
+      analyser.connect(audioCtx.destination);
+    }
+    function mediaUrl(track) {
+      return "/api/media?name=" + encodeURIComponent(track);
+    }
+    function stopDeck() {
+      ending = false;
+      if (!deck.dataset.track && !deck.getAttribute("src")) { deck.pause(); return; }
+      deck.pause();
+      deck.removeAttribute("src");
+      deck.dataset.track = "";
+      try { deck.load(); } catch (_e) {}
+    }
+    function cueDeck(p, start) {
+      const track = p.track;
+      if (!track) return;
+      const want = (typeof start === "number") ? start : (p.position || 0);
+      if (deck.dataset.track !== track) {
+        deck.src = mediaUrl(track);
+        deck.dataset.track = track;
+        deck.onloadedmetadata = () => {
+          if (want > 0.2 && isFinite(deck.duration)) {
+            try { deck.currentTime = Math.min(want, Math.max(0, deck.duration - 0.05)); } catch (_e) {}
+          }
+        };
+      }
+      deck.volume = Math.max(0, Math.min(1, (state.volume || 80) / 100));
+      hookDeck();
+      const run = deck.play();
+      if (run && run.catch) run.catch(() => {});
+    }
+    function paintOutput(mode) {
+      const on = mode === "browser";
+      document.getElementById("out-optical").classList.toggle("armed", !on);
+      document.getElementById("out-browser").classList.toggle("armed", on);
+      document.getElementById("set-optical").classList.toggle("armed", !on);
+      document.getElementById("set-browser").classList.toggle("armed", on);
+      document.getElementById("set-note").textContent = on ? "Route: this browser \u2014 optical is silent" : "Route: host optical (TOSLINK)";
+    }
+    function setOutput(mode) { post("/api/output", { output: mode }); }
+    function applyPlayer(p) {
+      state.playing = !!p.playing;
+      state.paused = !!p.paused;
+      state.shuffle = !!p.shuffle;
+      state.repeat = p.repeat || "off";
+      state.output = p.output === "browser" ? "browser" : "optical";
+      state.rms = typeof p.rms === "number" ? p.rms : 0;
+      state.volume = typeof p.volume === "number" ? p.volume : state.volume;
+      if (typeof p.position === "number") state.position = p.position;
+      if (typeof p.duration === "number") state.duration = p.duration;
+      state.posAt = performance.now();
+      paintSeek();
+    }
+    function paintSeek() {
+      if (state.scrubbing) return;
+      const pos = livePos();
+      const dur = state.duration || 0;
+      const frac = dur > 0 ? pos / dur : 0;
+      document.getElementById("t-now").textContent = fmtTime(pos);
+      document.getElementById("t-end").textContent = fmtTime(dur);
+      document.getElementById("scrub").value = Math.round(frac * 1000);
+      document.getElementById("scrub-fill").style.width = (frac * 100) + "%";
+    }
+    function renderList(p) {
+      const box = document.getElementById("pane-lib");
+      const tracks = p.tracks || [];
+      const tags = p.tags || {};
+      const idx = typeof p.index === "number" ? p.index : -1;
+      const sig = tracks.length + ":" + idx + ":" + state.filter + ":" + JSON.stringify(tags);
+      if (box.dataset.sig === sig) return;
+      box.dataset.sig = sig;
+      box.innerHTML = "";
+      const filter = document.createElement("select");
+      filter.className = "filter";
+      filter.innerHTML = "<option value=\"\">All genres</option>" + (p.genres || []).map((g) => "<option value=\"" + g + "\"" + (state.filter === g ? " selected" : "") + ">" + g + "</option>").join("");
+      filter.onchange = () => { state.filter = filter.value; box.dataset.sig = ""; renderList(state.lastPlayer || p); };
+      box.appendChild(filter);
+      tracks.forEach((name, i) => {
+        const genre = tags[name] || "";
+        if (state.filter && genre !== state.filter) return;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "row" + (i === idx ? " active" : "");
+        btn.innerHTML = "<span class=\"num\">" + String(i + 1).padStart(2, "0") + "</span>" + prettyName(name) + (genre ? " <span class=\"num\">" + genre + "</span>" : "");
+        btn.onclick = () => post("/api/play", { index: i });
+        box.appendChild(btn);
+      });
+      const active = box.querySelector(".row.active");
+      if (active) active.scrollIntoView({ block: "nearest" });
+    }
+    function renderManage(p) {
+      const box = document.getElementById("pane-mgr");
+      if (document.activeElement && box.contains(document.activeElement)) return;
+      const tracks = p.tracks || [];
+      const tags = p.tags || {};
+      const genres = p.genres || [];
+      const sig = tracks.join("|") + JSON.stringify(tags);
+      if (box.dataset.sig === sig) return;
+      box.dataset.sig = sig;
+      box.innerHTML = "";
+      tracks.forEach((name, i) => {
+        const row = document.createElement("div");
+        row.className = "mgr";
+        const ttl = document.createElement("div");
+        ttl.className = "ttl";
+        ttl.textContent = prettyName(name);
+        const sel = document.createElement("select");
+        sel.innerHTML = "<option value=\"\">Genre</option>" + genres.map((g) => "<option value=\"" + g + "\"" + ((tags[name] || "") === g ? " selected" : "") + ">" + g + "</option>").join("");
+        sel.onchange = () => post("/api/tag", { index: i, genre: sel.value });
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "x";
+        del.textContent = "\u00d7";
+        del.title = "Delete from host";
+        del.onclick = () => { if (confirm("Delete this track from the host?")) post("/api/delete", { index: i }); };
+        row.appendChild(ttl);
+        row.appendChild(sel);
+        row.appendChild(del);
+        box.appendChild(row);
+      });
+    }
+    function showTab(which) {
+      document.getElementById("tab-lib").classList.toggle("on", which === "lib");
+      document.getElementById("tab-mgr").classList.toggle("on", which === "mgr");
+      document.getElementById("tab-up").classList.toggle("on", which === "up");
+      document.getElementById("tab-set").classList.toggle("on", which === "set");
+      document.getElementById("pane-lib").hidden = which !== "lib";
+      document.getElementById("pane-mgr").hidden = which !== "mgr";
+      document.getElementById("pane-up").hidden = which !== "up";
+      document.getElementById("pane-set").hidden = which !== "set";
+    }
+    function uploadFiles(fileList) {
+      const files = Array.from(fileList || []);
+      if (!files.length) return;
+      const fd = new FormData();
+      files.forEach((f) => fd.append("file", f, f.name));
+      const xhr = new XMLHttpRequest();
+      const log = document.getElementById("uplog");
+      const bar = document.getElementById("prog");
+      log.textContent = "Sending " + files.length + " file" + (files.length > 1 ? "s" : "") + "\u2026";
+      bar.style.width = "0%";
+      xhr.upload.onprogress = (ev) => {
+        if (!ev.lengthComputable) return;
+        bar.style.width = Math.round((ev.loaded / ev.total) * 100) + "%";
+      };
+      xhr.onload = () => {
+        let msg = xhr.responseText;
+        try {
+          const d = JSON.parse(xhr.responseText);
+          const n = (d.saved || []).length;
+          const err = (d.errors || []).join("; ");
+          msg = n ? ("Saved " + n) : "Nothing saved";
+          if (err) msg += " \u00b7 " + err;
+          if (d.error) msg = d.error;
+        } catch (_e) {}
+        log.textContent = msg;
+        bar.style.width = "100%";
+        document.getElementById("pane-lib").dataset.sig = "";
+        document.getElementById("pane-mgr").dataset.sig = "";
+        refresh();
+      };
+      xhr.onerror = () => { log.textContent = "upload failed"; };
+      xhr.open("POST", "/api/upload");
+      xhr.send(fd);
+    }
+    async function post(path, body, opts) {
+      await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body || {}),
+      });
+      if (!opts || !opts.silent) refresh();
+    }
+    document.getElementById("btn-play").onclick = () => { flashStorm(); post("/api/play"); };
+    document.getElementById("btn-pause").onclick = () => {
+      if (state.paused) post("/api/play");
+      else post("/api/pause");
+    };
+    document.getElementById("btn-stop").onclick = () => post("/api/stop");
+    document.getElementById("btn-next").onclick = () => { flashStorm(); post("/api/next"); };
+    document.getElementById("btn-shuffle").onclick = () => post("/api/shuffle", { shuffle: !state.shuffle });
+    document.getElementById("btn-repeat").onclick = () => post("/api/repeat");
+    const scrub = document.getElementById("scrub");
+    scrub.oninput = () => {
+      state.scrubbing = true;
+      const dur = state.duration || 0;
+      const pos = dur * (Number(scrub.value) / 1000);
+      document.getElementById("t-now").textContent = fmtTime(pos);
+      document.getElementById("scrub-fill").style.width = (Number(scrub.value) / 10) + "%";
+    };
+    function commitSeek() {
+      const dur = (state.output === "browser" && isFinite(deck.duration) && deck.duration > 0) ? deck.duration : (state.duration || 0);
+      const pos = dur * (Number(scrub.value) / 1000);
+      state.position = pos;
+      state.posAt = performance.now();
+      state.scrubbing = false;
+      if (state.output === "browser") { try { deck.currentTime = pos; } catch (_e) {} }
+      if (dur > 0) post("/api/seek", { seconds: pos });
+    }
+    scrub.onchange = commitSeek;
+    scrub.onkeyup = (ev) => { if (ev.key === "Enter") commitSeek(); };
+    let volTimer = null;
+    function sendVolume(value, immediate) {
+      const n = Number(value);
+      state.volume = n;
+      document.getElementById("vol-label").textContent = String(n);
+      if (state.output === "browser") deck.volume = Math.max(0, Math.min(1, n / 100));
+      const fire = () => post("/api/volume", { volume: n }, { silent: true });
+      if (immediate) {
+        if (volTimer) clearTimeout(volTimer);
+        volTimer = null;
+        fire();
+        return;
+      }
+      if (volTimer) clearTimeout(volTimer);
+      volTimer = setTimeout(fire, 40);
+    }
+    document.getElementById("vol").oninput = (ev) => sendVolume(ev.target.value, false);
+    document.getElementById("vol").onchange = (ev) => sendVolume(ev.target.value, true);
+    document.getElementById("tab-lib").onclick = () => showTab("lib");
+    document.getElementById("tab-mgr").onclick = () => showTab("mgr");
+    document.getElementById("tab-up").onclick = () => showTab("up");
+    document.getElementById("tab-set").onclick = () => showTab("set");
+    document.getElementById("out-optical").onclick = () => setOutput("optical");
+    document.getElementById("out-browser").onclick = () => setOutput("browser");
+    document.getElementById("set-optical").onclick = () => setOutput("optical");
+    document.getElementById("set-browser").onclick = () => setOutput("browser");
+    deck.addEventListener("ended", async () => {
+      if (state.output !== "browser" || ending) return;
+      ending = true;
+      if (state.repeat === "one") {
+        try { deck.currentTime = 0; } catch (_e) {}
+        const run = deck.play();
+        if (run && run.catch) run.catch(() => {});
+        ending = false;
+        return;
+      }
+      try {
+        const r = await fetch("/api/next", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+        const p = await r.json();
+        applyPlayer(p);
+        paintOutput(p.output === "browser" ? "browser" : "optical");
+        if (p.playing) cueDeck(p, 0);
+        else stopDeck();
+        refresh();
+      } catch (_e) { stopDeck(); }
+      ending = false;
+    });
+    deck.addEventListener("timeupdate", () => {
+      if (state.output === "browser" && isFinite(deck.duration) && deck.duration > 0) {
+        state.duration = deck.duration;
+        state.position = deck.currentTime;
+        state.posAt = performance.now();
+      }
+    });
+    const drop = document.getElementById("drop");
+    const file = document.getElementById("file");
+    file.onchange = () => uploadFiles(file.files);
+    drop.ondragover = (ev) => { ev.preventDefault(); drop.classList.add("hot"); };
+    drop.ondragleave = () => drop.classList.remove("hot");
+    drop.ondrop = (ev) => {
+      ev.preventDefault();
+      drop.classList.remove("hot");
+      uploadFiles(ev.dataTransfer.files);
+    };
+    async function pulse() {
+      try {
+        const r = await fetch("/api/player", { cache: "no-store" });
+        if (!r.ok) return;
+        applyPlayer(await r.json());
+      } catch (_e) {}
+    }
+    refresh();
+    setInterval(refresh, 2000);
+    setInterval(pulse, 120);
+  </script>
+</body>
+</html>
