@@ -651,6 +651,13 @@
               <button type="button" id="set-browser">This browser</button>
             </div>
             <p id="set-note">Route: optical</p>
+            <h2>AirPlay</h2>
+            <p>When on, an iPhone or Mac can send audio to Giggwatt. It plays on the optical jack, and the HUD shows the track.</p>
+            <div class="route" role="group" aria-label="AirPlay">
+              <button type="button" id="airplay-off">Off</button>
+              <button type="button" id="airplay-on">On</button>
+            </div>
+            <p id="airplay-note">AirPlay is off</p>
           </div>
         </div>
       </aside>
@@ -672,7 +679,7 @@
     const state = {
       playing: false, paused: false, rms: 0, volume: 80,
       position: 0, duration: 0, posAt: 0, scrubbing: false,
-      shuffle: false, repeat: "off", output: "optical",
+      shuffle: false, repeat: "off", output: "optical", airplay: false, airplayActive: false,
       bins: new Float32Array(72), filter: "", lastPlayer: null,
       lastTrack: "", departedTrack: "\u2014", departedAt: "\u2014 \u2014 \u2014\u2014"
     };
@@ -715,11 +722,12 @@
       const t = ts / 1000;
       const cx = w / 2;
       const cy = h * 0.40;
+      const live = state.playing || state.airplayActive;
       const rms = state.output === "browser" ? browserRms() : state.rms;
-      const energy = state.playing ? (0.22 + rms * 0.9) * (0.35 + state.volume / 140) : 0.06;
+      const energy = live ? (0.22 + rms * 0.9) * (0.35 + state.volume / 140) : 0.06;
       const n = state.bins.length;
       for (let i = 0; i < n; i++) {
-        const target = energy * (0.35 + noise(i, t) * (state.playing ? 1 : 0.25));
+        const target = energy * (0.35 + noise(i, t) * (live ? 1 : 0.25));
         state.bins[i] += (target - state.bins[i]) * 0.22;
       }
       ctx.fillStyle = "rgba(7, 8, 11, 0.22)";
@@ -743,7 +751,7 @@
       });
       ctx.beginPath();
       ctx.arc(cx, cy, 7 + energy * 10, 0, Math.PI * 2);
-      ctx.fillStyle = state.playing ? "rgba(255,154,26,0.95)" : "rgba(154,163,173,0.45)";
+      ctx.fillStyle = (state.playing || state.airplayActive) ? "rgba(255,154,26,0.95)" : "rgba(154,163,173,0.45)";
       ctx.fill();
       const frac = state.duration > 0 ? Math.max(0, Math.min(1, livePos() / state.duration)) : 0;
       if (frac > 0) {
@@ -759,7 +767,7 @@
         ctx.arc(cx, cy, ring, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
         ctx.stroke();
       }
-      if (state.playing) {
+      if (state.playing || state.airplayActive) {
         ctx.save();
         ctx.font = "700 18px \"Share Tech Mono\", monospace";
         ctx.fillStyle = "rgba(255,43,43,0.85)";
@@ -786,15 +794,29 @@
         document.getElementById("disk-left").textContent = diskFree != null ? fmtBytes(diskFree) : "\u2014";
         const p = d.player || {};
         applyPlayer(p);
+        const ap = p.airplay || {};
         const chip = document.getElementById("chip");
-        chip.textContent = state.playing ? "88 MPH" : (state.paused ? "HOLD" : "STANDBY");
-        chip.className = "chip" + (state.playing ? " live" : (state.paused ? " pause" : ""));
-        const name = prettyName(p.track) || "No media";
+        if (ap.active) {
+          chip.textContent = "AIRPLAY";
+          chip.className = "chip live";
+        } else {
+          chip.textContent = state.playing ? "88 MPH" : (state.paused ? "HOLD" : "STANDBY");
+          chip.className = "chip" + (state.playing ? " live" : (state.paused ? " pause" : ""));
+        }
+        const name = ap.active
+          ? (ap.title || "AirPlay")
+          : (prettyName(p.track) || "No media");
         document.getElementById("track").textContent = name;
-        paintCircuits(p, d);
+        paintCircuits(p, d, ap);
         const sub = document.getElementById("player-sub");
-        sub.className = "meta" + (p.error ? " err" : "");
-        sub.textContent = p.error ? p.error : ((p.tracks && p.tracks.length) ? (state.playing ? (state.output === "browser" ? "this browser" : "decode \u00b7 paplay \u00b7 spdif") : (state.paused ? "paused" : "queue " + p.tracks.length)) + (p.shuffle ? " \u00b7 shuffle" : "") + (p.repeat === "one" ? " \u00b7 replay 1" : (p.repeat === "all" ? " \u00b7 replay all" : "")) : "empty /data/music");
+        sub.className = "meta" + (p.error || ap.error ? " err" : "");
+        if (ap.error) sub.textContent = ap.error;
+        else if (ap.active) {
+          sub.textContent = [ap.artist, ap.album].filter(Boolean).join(" \u00b7 ") || "AirPlay \u00b7 optical";
+        } else {
+          sub.textContent = p.error ? p.error : ((p.tracks && p.tracks.length) ? (state.playing ? (state.output === "browser" ? "this browser" : "decode \u00b7 paplay \u00b7 spdif") : (state.paused ? "paused" : "queue " + p.tracks.length)) + (p.shuffle ? " \u00b7 shuffle" : "") + (p.repeat === "one" ? " \u00b7 replay 1" : (p.repeat === "all" ? " \u00b7 replay all" : "")) : "empty /data/music");
+        }
+        paintAirplay(ap);
         const pauseBtn = document.getElementById("btn-pause");
         pauseBtn.textContent = state.paused ? "Resume" : "Pause";
         pauseBtn.disabled = !state.playing && !state.paused;
@@ -839,8 +861,8 @@
       el.classList.add("on");
       setTimeout(() => el.classList.remove("on"), 120);
     }
-    function paintCircuits(p, d) {
-      const track = prettyName(p.track) || "\u2014";
+    function paintCircuits(p, d, ap) {
+      const track = (ap && ap.active && ap.title) ? ap.title : (prettyName(p.track) || "\u2014");
       if (state.lastTrack && p.track && state.lastTrack !== p.track) {
         state.departedTrack = prettyName(state.lastTrack);
         state.departedAt = circuitStamp(new Date());
@@ -848,7 +870,7 @@
       if (p.track) state.lastTrack = p.track;
       const left = (state.duration > 0) ? Math.max(0, state.duration - livePos()) : null;
       document.getElementById("dest-val").textContent = track;
-      document.getElementById("dest-clk").textContent = state.playing || state.paused ? remainStamp(left) : "OCT 26 1985";
+      document.getElementById("dest-clk").textContent = (ap && ap.active) ? "AIRPLAY" : (state.playing || state.paused ? remainStamp(left) : "OCT 26 1985");
       document.getElementById("present-val").textContent = "Giggwatt";
       document.getElementById("present-clk").textContent = circuitStamp(new Date());
       document.getElementById("departed-val").textContent = state.departedTrack;
@@ -941,12 +963,26 @@
       document.getElementById("set-note").textContent = on ? "Route: this browser \u2014 optical is silent" : "Route: host optical (TOSLINK)";
     }
     function setOutput(mode) { post("/api/output", { output: mode }); }
+    function paintAirplay(ap) {
+      const on = !!(ap && ap.enabled);
+      const active = !!(ap && ap.active);
+      document.getElementById("airplay-on").classList.toggle("armed", on);
+      document.getElementById("airplay-off").classList.toggle("armed", !on);
+      let note = "AirPlay is off";
+      if (!ap || !ap.available) note = "AirPlay binary is not on this host";
+      else if (active) note = "Receiving AirPlay" + (ap.title ? " \u2014 " + ap.title : "");
+      else if (on) note = "AirPlay on \u2014 looks for Giggwatt on iPhone or Mac";
+      document.getElementById("airplay-note").textContent = note;
+    }
+    function setAirplay(on) { post("/api/airplay", { enabled: !!on }); }
     function applyPlayer(p) {
       state.playing = !!p.playing;
       state.paused = !!p.paused;
       state.shuffle = !!p.shuffle;
       state.repeat = p.repeat || "off";
       state.output = p.output === "browser" ? "browser" : "optical";
+      state.airplay = !!(p.airplay && p.airplay.enabled);
+      state.airplayActive = !!(p.airplay && p.airplay.active);
       state.rms = typeof p.rms === "number" ? p.rms : 0;
       state.volume = typeof p.volume === "number" ? p.volume : state.volume;
       if (typeof p.position === "number") state.position = p.position;
@@ -1128,6 +1164,8 @@
     document.getElementById("out-browser").onclick = () => setOutput("browser");
     document.getElementById("set-optical").onclick = () => setOutput("optical");
     document.getElementById("set-browser").onclick = () => setOutput("browser");
+    document.getElementById("airplay-on").onclick = () => setAirplay(true);
+    document.getElementById("airplay-off").onclick = () => setAirplay(false);
     deck.addEventListener("ended", async () => {
       if (state.output !== "browser" || ending) return;
       ending = true;

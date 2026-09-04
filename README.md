@@ -15,7 +15,7 @@ This project is **not affiliated with Savant Systems**. The hardware is a former
 - Browser on the LAN: Play, Pause, Stop, Next, seek, shuffle, replay, volume fade
 - No cloud, no Savant app, no extra daemon if we can avoid it
 
-## Current status — V0.6
+## Current status — V0.7
 
 Target host: **192.168.1.180** (`sav-001aae073afe0000`)
 
@@ -32,6 +32,7 @@ Target host: **192.168.1.180** (`sav-001aae073afe0000`)
 | Volume | Pulse sink fade; does not restart the decoder |
 | Pause | SIGSTOP / SIGCONT on the decode+play process group |
 | Seek | HUD bar + flux-capacitor ring; restart ffmpeg at `-ss` |
+| AirPlay | Optional receiver (`shairport-sync`) to TOSLINK; HUD shows the iPhone/Mac track |
 | Name | **Giggwatt** |
 | Theme | Time-circuit HUD, red/green/amber LEDs, flux-Y visualizer |
 

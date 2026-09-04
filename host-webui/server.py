@@ -15,6 +15,8 @@ import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+from airplay import AirPlay
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("WEBUI_PORT", "80"))
 MUSIC_DIR = os.environ.get("MUSIC_DIR", "/data/music")
@@ -23,7 +25,8 @@ RMS_RE = re.compile(r"RMS(?:_level| level dB:)\s*=?\s*(-?[\d.]+)")
 DUR_RE = re.compile(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
 OUT_RE = re.compile(r"out_time=(\d+):(\d+):(\d+(?:\.\d+)?)")
 MAX_UPLOAD = 90 * 1024 * 1024
-VERSION = "0.6"
+VERSION = "0.7"
+AIRPLAY_DIR = os.environ.get("AIRPLAY_DIR", "/data/opt/airplay")
 REPEAT_MODES = ("off", "all", "one")
 OUTPUTS = ("optical", "browser")
 PULSE_SINK = os.environ.get("PULSE_SINK", "@DEFAULT_SINK@")
@@ -132,6 +135,7 @@ class Jukebox:
         self.vol_target = 80
         self.output = "optical"
         self.session = False
+        self.airplay_wanted = False
         self._load_tags()
         self._load_settings()
         self._apply_pulse_volume(self.volume)
@@ -159,14 +163,16 @@ class Jukebox:
             out = data.get("output")
             if out in OUTPUTS:
                 self.output = out
+            self.airplay_wanted = bool(data.get("airplay"))
         except Exception:
             self.output = "optical"
+            self.airplay_wanted = False
 
     def _save_settings(self):
         os.makedirs(MUSIC_DIR, exist_ok=True)
         tmp = SETTINGS_FILE + ".tmp"
         with open(tmp, "w") as fh:
-            json.dump({"output": self.output}, fh)
+            json.dump({"output": self.output, "airplay": bool(self.airplay_wanted)}, fh)
         os.replace(tmp, SETTINGS_FILE)
 
     def tracks(self):
@@ -274,6 +280,7 @@ class Jukebox:
                 "outputs": list(OUTPUTS),
                 "backend": "browser" if self.output == "browser" else "ffmpeg | paplay",
                 "version": VERSION,
+                "airplay": AIRPLAY.snapshot() if AIRPLAY is not None else {"available": False, "enabled": False, "active": False},
             }
 
     def stop(self):
@@ -739,7 +746,17 @@ class Jukebox:
             self._advance_locked()
 
 
+AIRPLAY = None
 PLAYER = Jukebox()
+AIRPLAY = AirPlay(AIRPLAY_DIR, on_begin=PLAYER.stop)
+
+
+def ensure_avahi():
+    if _cmd(["systemctl", "is-active", "avahi-daemon"]) == "active":
+        return True
+    _cmd(["sudo", "-n", "/usr/bin/env", "systemctl", "start", "avahi-daemon.socket"])
+    _cmd(["sudo", "-n", "/usr/bin/env", "systemctl", "start", "avahi-daemon"])
+    return _cmd(["systemctl", "is-active", "avahi-daemon"]) == "active"
 
 
 def status():
@@ -1003,6 +1020,20 @@ class Handler(SimpleHTTPRequestHandler):
             ok = PLAYER.set_output(data.get("output"))
             _json(self, PLAYER.snapshot(), 200 if ok else 400)
             return
+        if path == "/api/airplay":
+            want = data.get("enabled")
+            if want is None:
+                want = data.get("airplay")
+            PLAYER.airplay_wanted = bool(want)
+            try:
+                PLAYER._save_settings()
+            except Exception:
+                pass
+            if PLAYER.airplay_wanted:
+                ensure_avahi()
+            ok = AIRPLAY.set_enabled(PLAYER.airplay_wanted)
+            _json(self, PLAYER.snapshot(), 200 if ok else 409)
+            return
         if path == "/api/tag":
             ok = PLAYER.set_genre(data.get("index"), data.get("genre"))
             _json(self, PLAYER.snapshot(), 200 if ok else 400)
@@ -1016,6 +1047,9 @@ class Handler(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     os.makedirs(MUSIC_DIR, exist_ok=True)
+    if PLAYER.airplay_wanted:
+        ensure_avahi()
+        AIRPLAY.set_enabled(True)
     httpd = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(
         "host-webui listening on 0.0.0.0:%s serving %s music=%s"

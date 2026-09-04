@@ -18,7 +18,8 @@ browser  --HTTP-->  python3 server.py :80
                          +-- GET /           UI
                          +-- GET /api/status host stats
                          +-- GET /api/player now playing, queue
-                         +-- POST /api/play|/pause|/stop|/next|/volume|/seek|/shuffle|/repeat|/output
+                         +-- POST /api/play|/pause|/stop|/next|/volume|/seek|/shuffle|/repeat|/output|/airplay
+                         +-- child: shairport-sync (optional AirPlay 1 → Pulse → TOSLINK)
                          +-- GET  /api/media?name=  file stream (Range) for browser output
                          |
                          +-- child: ffmpeg | paplay   (V0.1+)
