@@ -353,6 +353,17 @@
       padding-bottom: 1.4rem;
       text-align: center;
     }
+    .readout {
+      width: min(560px, 100%);
+      padding: 0.75rem 0.85rem 1rem;
+      border: 1px solid var(--line);
+      background: rgba(7, 8, 11, 0.72);
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+    }
+    .readout .circuits,
+    .readout .seek {
+      width: 100%;
+    }
     .now-label {
       letter-spacing: 0.34em;
       font-size: 0.65rem;
@@ -364,8 +375,11 @@
       font-size: clamp(1.2rem, 3.4vw, 2rem);
       font-weight: 500;
       letter-spacing: 0.04em;
-      max-width: 90vw;
-      text-shadow: 0 0 24px rgba(255, 43, 43, 0.28);
+      max-width: 100%;
+      text-shadow:
+        0 1px 2px #000,
+        0 0 18px rgba(0, 0, 0, 0.85),
+        0 0 24px rgba(255, 43, 43, 0.28);
     }
     .meta { color: var(--mute); font-size: 0.85rem; min-height: 1.2em; }
     .err { color: var(--danger); }
@@ -515,6 +529,36 @@
       .hud { height: auto; min-height: 100%; }
       .stage { grid-template-columns: 1fr; }
       .playlist { max-height: 42vh; }
+      .top {
+        background: rgba(7, 8, 11, 0.9);
+        border: 1px solid var(--line);
+        padding: 0.55rem 0.7rem 0.65rem;
+      }
+      .readout {
+        background: rgba(7, 8, 11, 0.94);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        padding: 0.9rem 0.75rem 1.05rem;
+      }
+      .circuit {
+        background: rgba(8, 9, 12, 0.96);
+      }
+      .controls button {
+        background: rgba(16, 18, 24, 0.95);
+      }
+      .controls button.primary {
+        background: var(--destination);
+        color: #140404;
+      }
+      .controls button.armed {
+        background: rgba(255, 204, 34, 0.18);
+      }
+      .bottom {
+        background: rgba(7, 8, 11, 0.9);
+        border: 1px solid var(--line);
+        padding: 0.45rem 0.7rem;
+        margin-top: 0.6rem;
+      }
     }
   </style>
 </head>
@@ -539,6 +583,7 @@
     </div>
     <div class="stage">
       <div class="center">
+        <div class="readout">
         <div class="circuits" aria-label="Time circuits">
           <div class="circuit dest">
             <div class="lab">Destination time</div>
@@ -578,6 +623,7 @@
             <input id="vol" type="range" min="0" max="100" value="80">
             <span id="vol-label">80</span>
           </label>
+        </div>
         </div>
       </div>
       <aside class="playlist">
