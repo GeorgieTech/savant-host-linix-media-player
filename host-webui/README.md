@@ -2,7 +2,8 @@
 
 Python 3.8 stdlib HTTP server plus a single HTML page. This is what currently runs on the SHC-2000 at `192.168.1.180:80`.
 
-- `GET /` — HUD (library, manage, upload, transport)
+- `GET /` — Gigawatt HUD (time circuits, library, manage, upload, transport)
+- `GET /bg-gigawatt.jpg` — optional steel/LED backdrop (copy next to index.html)
 - `GET /api/status` — JSON: hostname, ip, uptime, load, mem, disk, `savant_running`, player
 - `GET /api/player` — now playing, pause, position, duration, volume, shuffle, repeat, output, tags
 - `GET /api/media?name=` — audio file stream with HTTP Range (browser output)

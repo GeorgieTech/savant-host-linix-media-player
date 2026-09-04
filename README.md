@@ -1,6 +1,6 @@
 # savant-host-linix-media-player
 
-Local jukebox for a recycled Savant SHC-2000 ARM Linux host. One process, files on disk, a tiny web page for Play / Pause / Stop / volume / next / seek / shuffle / replay, with optical or browser output.
+Local jukebox for a recycled Savant SHC-2000 ARM Linux host. One process, files on disk, Gigawatt-skinned web page for Play / Pause / Stop / volume / next / seek / shuffle / replay, with optical or browser output.
 
 This project is **not affiliated with Savant Systems**. The hardware is a former Smart Host whose Savant runtime has been stopped. The Linux image underneath is reused as a small LAN appliance.
 
@@ -13,7 +13,7 @@ This project is **not affiliated with Savant Systems**. The hardware is a former
 - Browser on the LAN: Play, Pause, Stop, Next, seek, shuffle, replay, volume fade
 - No cloud, no Savant app, no extra daemon if we can avoid it
 
-## Current status — V0.5
+## Current status — V0.6
 
 Target host: **192.168.1.180** (`sav-001aae073afe0000`)
 
@@ -29,7 +29,8 @@ Target host: **192.168.1.180** (`sav-001aae073afe0000`)
 | Queue | Play from a picked track, then continue to the next (or shuffled bag) |
 | Volume | Pulse sink fade; does not restart the decoder |
 | Pause | SIGSTOP / SIGCONT on the decode+play process group |
-| Seek | HUD bar + radar ring; restart ffmpeg at `-ss` |
+| Seek | HUD bar + flux-capacitor ring; restart ffmpeg at `-ss` |
+| Theme | **Gigawatt** — time-circuit HUD, red/green/amber LEDs, flux-Y visualizer |
 
 Source of truth for the running page is `host-webui/` in this repo.
 
