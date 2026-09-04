@@ -1,0 +1,11 @@
+.DS_Store
+*.pyc
+__pycache__/
+.venv/
+venv/
+*.swp
+*~
+data/music/
+opt/
+.idea/
+.vscode/
