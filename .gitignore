@@ -6,6 +6,8 @@ venv/
 *.swp
 *~
 data/music/
+Music/
+**/.library.json
 opt/
 .idea/
 .vscode/

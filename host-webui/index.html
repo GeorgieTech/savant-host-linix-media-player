@@ -25,7 +25,7 @@
     }
     .stage {
       display: grid;
-      grid-template-columns: 1fr minmax(220px, 340px);
+      grid-template-columns: 1fr minmax(260px, 400px);
       gap: 1rem;
       min-height: 0;
       align-items: stretch;
@@ -126,6 +126,50 @@
       height: 100%;
       width: 0;
       background: var(--cyan);
+    }
+    .filter {
+      display: block;
+      width: calc(100% - 1.4rem);
+      margin: 0.55rem 0.7rem 0.2rem;
+      background: #07100e;
+      color: var(--ink);
+      border: 1px solid var(--line);
+      font: inherit;
+      font-size: 0.75rem;
+      padding: 0.35rem 0.4rem;
+    }
+    .mgr {
+      display: grid;
+      grid-template-columns: 1fr 7.2rem 2.1rem;
+      gap: 0.3rem;
+      align-items: center;
+      padding: 0.4rem 0.55rem;
+      border-bottom: 1px solid rgba(77, 255, 210, 0.08);
+    }
+    .mgr .ttl {
+      font-size: 0.75rem;
+      letter-spacing: 0.02em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .mgr select {
+      width: 100%;
+      background: #07100e;
+      color: var(--ink);
+      border: 1px solid var(--line);
+      font: inherit;
+      font-size: 0.68rem;
+      padding: 0.25rem 0.2rem;
+    }
+    .mgr .x {
+      min-width: 0;
+      padding: 0.3rem 0;
+      letter-spacing: 0;
+      font-size: 0.85rem;
+      color: var(--danger);
+      border-color: rgba(255, 90, 74, 0.45);
+      box-shadow: none;
     }
     canvas#viz {
       position: fixed;
@@ -298,9 +342,11 @@
       <aside class="playlist">
         <div class="tabs">
           <button type="button" class="on" id="tab-lib">Library</button>
+          <button type="button" id="tab-mgr">Manage</button>
           <button type="button" id="tab-up">Upload</button>
         </div>
         <div id="pane-lib"></div>
+        <div id="pane-mgr" hidden></div>
         <div id="pane-up" hidden>
           <label class="drop" id="drop">Drop opus / mp3 / flac here
             <input id="file" type="file" accept=".opus,.mp3,.flac,.ogg,.wav,.m4a,.aac,audio/*" multiple>
@@ -321,7 +367,7 @@
     </div>
   </div>
   <script>
-    const state = { playing: false, rms: 0, volume: 80, bins: new Float32Array(72) };
+    const state = { playing: false, rms: 0, volume: 80, bins: new Float32Array(72), filter: "", lastPlayer: null };
     const canvas = document.getElementById("viz");
     const ctx = canvas.getContext("2d");
     let w = 0, h = 0, dpr = 1;
@@ -446,7 +492,9 @@
           document.getElementById("vol").value = p.volume;
           document.getElementById("vol-label").textContent = p.volume;
         }
+        state.lastPlayer = p;
         renderList(p);
+        renderManage(p);
         document.getElementById("stamp").textContent = new Date().toLocaleTimeString();
       } catch (err) {
         document.getElementById("player-sub").textContent = String(err.message || err);
@@ -460,28 +508,73 @@
     function renderList(p) {
       const box = document.getElementById("pane-lib");
       const tracks = p.tracks || [];
+      const tags = p.tags || {};
       const idx = typeof p.index === "number" ? p.index : -1;
-      const sig = tracks.length + ":" + idx + ":" + (p.playing ? "1" : "0");
+      const sig = tracks.length + ":" + idx + ":" + state.filter + ":" + JSON.stringify(tags);
       if (box.dataset.sig === sig) return;
       box.dataset.sig = sig;
       box.innerHTML = "";
+      const filter = document.createElement("select");
+      filter.className = "filter";
+      filter.innerHTML = "<option value=\"\">All genres</option>" +
+        (p.genres || []).map((g) => "<option value=\"" + g + "\"" + (state.filter === g ? " selected" : "") + ">" + g + "</option>").join("");
+      filter.onchange = () => { state.filter = filter.value; box.dataset.sig = ""; renderList(state.lastPlayer || p); };
+      box.appendChild(filter);
       tracks.forEach((name, i) => {
+        const genre = tags[name] || "";
+        if (state.filter && genre !== state.filter) return;
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "row" + (i === idx ? " active" : "");
-        btn.innerHTML = "<span class=\"num\">" + String(i + 1).padStart(2, "0") + "</span>" + prettyName(name);
+        btn.innerHTML = "<span class=\"num\">" + String(i + 1).padStart(2, "0") + "</span>" + prettyName(name) +
+          (genre ? " <span class=\"num\">" + genre + "</span>" : "");
         btn.onclick = () => post("/api/play", { index: i });
         box.appendChild(btn);
       });
       const active = box.querySelector(".row.active");
       if (active) active.scrollIntoView({ block: "nearest" });
     }
+    function renderManage(p) {
+      const box = document.getElementById("pane-mgr");
+      if (document.activeElement && box.contains(document.activeElement)) return;
+      const tracks = p.tracks || [];
+      const tags = p.tags || {};
+      const genres = p.genres || [];
+      const sig = tracks.join("|") + JSON.stringify(tags);
+      if (box.dataset.sig === sig) return;
+      box.dataset.sig = sig;
+      box.innerHTML = "";
+      tracks.forEach((name, i) => {
+        const row = document.createElement("div");
+        row.className = "mgr";
+        const ttl = document.createElement("div");
+        ttl.className = "ttl";
+        ttl.textContent = prettyName(name);
+        const sel = document.createElement("select");
+        sel.innerHTML = "<option value=\"\">Genre</option>" +
+          genres.map((g) => "<option value=\"" + g + "\"" + ((tags[name] || "") === g ? " selected" : "") + ">" + g + "</option>").join("");
+        sel.onchange = () => post("/api/tag", { index: i, genre: sel.value });
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "x";
+        del.textContent = "×";
+        del.title = "Delete from host";
+        del.onclick = () => {
+          if (confirm("Delete this track from the host?")) post("/api/delete", { index: i });
+        };
+        row.appendChild(ttl);
+        row.appendChild(sel);
+        row.appendChild(del);
+        box.appendChild(row);
+      });
+    }
     function showTab(which) {
-      const lib = which === "lib";
-      document.getElementById("tab-lib").classList.toggle("on", lib);
-      document.getElementById("tab-up").classList.toggle("on", !lib);
-      document.getElementById("pane-lib").hidden = !lib;
-      document.getElementById("pane-up").hidden = lib;
+      document.getElementById("tab-lib").classList.toggle("on", which === "lib");
+      document.getElementById("tab-mgr").classList.toggle("on", which === "mgr");
+      document.getElementById("tab-up").classList.toggle("on", which === "up");
+      document.getElementById("pane-lib").hidden = which !== "lib";
+      document.getElementById("pane-mgr").hidden = which !== "mgr";
+      document.getElementById("pane-up").hidden = which !== "up";
     }
     function uploadFiles(fileList) {
       const files = Array.from(fileList || []);
@@ -510,6 +603,7 @@
         log.textContent = msg;
         bar.style.width = "100%";
         document.getElementById("pane-lib").dataset.sig = "";
+        document.getElementById("pane-mgr").dataset.sig = "";
         refresh();
       };
       xhr.onerror = () => { log.textContent = "upload failed"; };
@@ -534,6 +628,7 @@
       post("/api/volume", { volume: Number(ev.target.value) });
     };
     document.getElementById("tab-lib").onclick = () => showTab("lib");
+    document.getElementById("tab-mgr").onclick = () => showTab("mgr");
     document.getElementById("tab-up").onclick = () => showTab("up");
     const drop = document.getElementById("drop");
     const file = document.getElementById("file");

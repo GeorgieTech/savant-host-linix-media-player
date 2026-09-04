@@ -18,6 +18,19 @@ MUSIC_DIR = os.environ.get("MUSIC_DIR", "/data/music")
 AUDIO_EXTS = {".mp3", ".flac", ".opus", ".ogg", ".wav", ".m4a", ".aac"}
 RMS_RE = re.compile(r"RMS(?:_level| level dB:)\s*=?\s*(-?[\d.]+)")
 MAX_UPLOAD = 90 * 1024 * 1024
+LIBRARY_FILE = os.path.join(MUSIC_DIR, ".library.json")
+GENRES = [
+    "Pop",
+    "Rock",
+    "Hip-Hop",
+    "R&B",
+    "Electronic",
+    "Jazz",
+    "Classical",
+    "Metal",
+    "Country",
+    "Soundtrack",
+]
 
 
 def _cmd(args):
@@ -81,6 +94,23 @@ class Jukebox:
         self.error = ""
         self.track = None
         self.rms = 0.0
+        self.tags = {}
+        self._load_tags()
+
+    def _load_tags(self):
+        try:
+            with open(LIBRARY_FILE, "r") as fh:
+                data = json.load(fh)
+            self.tags = data.get("tags") or {}
+        except Exception:
+            self.tags = {}
+
+    def _save_tags(self):
+        os.makedirs(MUSIC_DIR, exist_ok=True)
+        tmp = LIBRARY_FILE + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump({"tags": self.tags}, fh)
+        os.replace(tmp, LIBRARY_FILE)
 
     def tracks(self):
         found = []
@@ -103,6 +133,13 @@ class Jukebox:
             if self.proc is not None and self.proc.poll() is not None:
                 self.proc = None
             names = [os.path.relpath(p, MUSIC_DIR) for p in tracks]
+            keep = set(names)
+            if any(key not in keep for key in list(self.tags.keys())):
+                self.tags = {k: v for k, v in self.tags.items() if k in keep}
+                try:
+                    self._save_tags()
+                except Exception:
+                    pass
             current = None
             if tracks:
                 self.index %= len(tracks)
@@ -112,6 +149,8 @@ class Jukebox:
                 "track": current,
                 "index": self.index if tracks else -1,
                 "tracks": names,
+                "tags": dict(self.tags),
+                "genres": GENRES,
                 "volume": self.volume,
                 "error": self.error,
                 "rms": round(self.rms, 3) if self._alive() else 0.0,
@@ -180,6 +219,71 @@ class Jukebox:
                     return False
                 self.index = index
             return self._play_locked()
+
+    def set_genre(self, index, genre):
+        with self.lock:
+            tracks = self.tracks()
+            try:
+                index = int(index)
+            except (TypeError, ValueError):
+                self.error = "bad track index"
+                return False
+            if index < 0 or index >= len(tracks):
+                self.error = "bad track index"
+                return False
+            genre = (genre or "").strip()
+            if genre and genre not in GENRES:
+                self.error = "unknown genre"
+                return False
+            name = os.path.relpath(tracks[index], MUSIC_DIR)
+            if genre:
+                self.tags[name] = genre
+            else:
+                self.tags.pop(name, None)
+            try:
+                self._save_tags()
+            except Exception as exc:
+                self.error = str(exc)
+                return False
+            self.error = ""
+            return True
+
+    def delete_track(self, index):
+        with self.lock:
+            tracks = self.tracks()
+            try:
+                index = int(index)
+            except (TypeError, ValueError):
+                self.error = "bad track index"
+                return False
+            if index < 0 or index >= len(tracks):
+                self.error = "bad track index"
+                return False
+            path = tracks[index]
+            name = os.path.relpath(path, MUSIC_DIR)
+            if self.track == path:
+                self._stop_locked()
+            try:
+                os.remove(path)
+            except Exception as exc:
+                self.error = str(exc)
+                return False
+            self.tags.pop(name, None)
+            try:
+                self._save_tags()
+            except Exception:
+                pass
+            leftover = self.tracks()
+            if leftover:
+                if index >= len(leftover):
+                    self.index = 0
+                else:
+                    self.index = index
+            else:
+                self.index = 0
+                self.track = None
+            self.error = ""
+            return True
 
     def _play_locked(self):
         tracks = self.tracks()
@@ -392,6 +496,14 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if path == "/api/volume":
             ok = PLAYER.set_volume(data.get("volume"))
+            _json(self, PLAYER.snapshot(), 200 if ok else 400)
+            return
+        if path == "/api/tag":
+            ok = PLAYER.set_genre(data.get("index"), data.get("genre"))
+            _json(self, PLAYER.snapshot(), 200 if ok else 400)
+            return
+        if path == "/api/delete":
+            ok = PLAYER.delete_track(data.get("index"))
             _json(self, PLAYER.snapshot(), 200 if ok else 400)
             return
         _json(self, {"error": "not found"}, 404)
