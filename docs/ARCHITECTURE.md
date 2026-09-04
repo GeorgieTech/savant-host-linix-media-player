@@ -18,7 +18,8 @@ browser  --HTTP-->  python3 server.py :80
                          +-- GET /           UI
                          +-- GET /api/status host stats
                          +-- GET /api/player now playing, queue
-                         +-- POST /api/play|/pause|/stop|/next|/volume|/seek|/shuffle|/repeat
+                         +-- POST /api/play|/pause|/stop|/next|/volume|/seek|/shuffle|/repeat|/output
+                         +-- GET  /api/media?name=  file stream (Range) for browser output
                          |
                          +-- child: ffmpeg | paplay   (V0.1+)
 ```
@@ -65,7 +66,10 @@ Same visual language as the current lab page (dark panel, copper accent). Transp
 - Replay (off / all / one)
 - Volume (fade)
 - Seek bar (elapsed / duration) plus a progress ring on the HUD
+- Audio out: host optical (TOSLINK) or this browser
 - RAM left / disk left on `/data`
+
+Output is a host setting (`/data/music/.settings.json`). Optical plays the room preamp. Browser streams the file to the page and leaves TOSLINK silent.
 
 Now-playing line under the buttons. No accounts, no websockets required: short polling of `/api/player` is enough. Position is wall-clock plus ffmpeg `out_time`, duration from `ffprobe` (ffmpeg Duration line as fallback).
 

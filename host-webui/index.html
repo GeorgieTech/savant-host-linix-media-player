@@ -207,6 +207,51 @@
       align-items: flex-end;
       gap: 1rem;
     }
+    .top-actions {
+      display: flex;
+      align-items: flex-end;
+      gap: 0.65rem;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .route {
+      display: flex;
+      border: 1px solid var(--line);
+      background: rgba(4, 8, 10, 0.45);
+    }
+    .route button {
+      min-width: 0;
+      padding: 0.38rem 0.7rem;
+      letter-spacing: 0.14em;
+      font-size: 0.62rem;
+      border: 0;
+      box-shadow: none;
+    }
+    audio#deck { display: none; }
+    .set {
+      padding: 0.75rem 0.7rem 1rem;
+      text-align: left;
+    }
+    .set h2 {
+      margin: 0 0 0.45rem;
+      padding: 0;
+      border: 0;
+      font-size: 0.65rem;
+      letter-spacing: 0.28em;
+      text-transform: uppercase;
+      color: var(--mute);
+      background: transparent;
+      position: static;
+    }
+    .set p {
+      margin: 0 0 0.7rem;
+      color: var(--mute);
+      font-size: 0.78rem;
+      line-height: 1.45;
+      letter-spacing: 0.02em;
+    }
+    .set .route { width: 100%; margin: 0.35rem 0 0.8rem; }
+    .set .route button { flex: 1; }
     .mark {
       letter-spacing: 0.42em;
       font-size: 0.68rem;
@@ -411,7 +456,13 @@
         <div class="mark">Local node</div>
         <h1 id="title">SIGNAL</h1>
       </div>
-      <div class="chip" id="chip">STANDBY</div>
+      <div class="top-actions">
+        <div class="route" role="group" aria-label="Audio output">
+          <button type="button" id="out-optical">Optical</button>
+          <button type="button" id="out-browser">Browser</button>
+        </div>
+        <div class="chip" id="chip">STANDBY</div>
+      </div>
     </div>
     <div class="stage">
       <div class="center">
@@ -444,6 +495,7 @@
           <button type="button" class="on" id="tab-lib">Library</button>
           <button type="button" id="tab-mgr">Manage</button>
           <button type="button" id="tab-up">Upload</button>
+          <button type="button" id="tab-set">Settings</button>
         </div>
         <div id="pane-lib"></div>
         <div id="pane-mgr" hidden></div>
@@ -454,7 +506,20 @@
           <div class="bar"><span id="prog"></span></div>
           <div class="upload-log" id="uplog">Files land in /data/music</div>
         </div>
+        <div id="pane-set" hidden>
+          <div class="set">
+            <h2>Audio out</h2>
+            <p>Pick where the queue plays. Optical is the host TOSLINK jack into a preamp. Browser plays on this phone or computer and keeps the optical port silent.</p>
+            <div class="route" role="group" aria-label="Audio output">
+              <button type="button" id="set-optical">Host optical</button>
+              <button type="button" id="set-browser">This browser</button>
+            </div>
+            <p id="set-note">Route: optical</p>
+          </div>
+        </div>
       </aside>
+    </div>
+    <audio id="deck" preload="metadata"></audio>
     </div>
     <div class="bottom">
       <div class="stats host-meta">
@@ -472,12 +537,15 @@
     const state = {
       playing: false, paused: false, rms: 0, volume: 80,
       position: 0, duration: 0, posAt: 0, scrubbing: false,
-      shuffle: false, repeat: "off",
+      shuffle: false, repeat: "off", output: "optical",
       bins: new Float32Array(72), filter: "", lastPlayer: null
     };
     const canvas = document.getElementById("viz");
     const ctx = canvas.getContext("2d");
+    const deck = document.getElementById("deck");
+    let audioCtx = null, analyser = null, timeBuf = null;
     let w = 0, h = 0, dpr = 1;
+    let ending = false;
 
     function resize() {
       dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -506,7 +574,8 @@
       const t = ts / 1000;
       const cx = w / 2;
       const cy = h * 0.42;
-      const energy = state.playing ? (0.22 + state.rms * 0.9) * (0.35 + state.volume / 140) : 0.06;
+      const rms = state.output === "browser" ? browserRms() : state.rms;
+      const energy = state.playing ? (0.22 + rms * 0.9) * (0.35 + state.volume / 140) : 0.06;
       const n = state.bins.length;
       for (let i = 0; i < n; i++) {
         const target = energy * (0.35 + noise(i, t) * (state.playing ? 1 : 0.25));
@@ -609,7 +678,9 @@
         sub.textContent = p.error
           ? p.error
           : ((p.tracks && p.tracks.length)
-            ? (state.playing ? "decode · paplay · spdif" : (state.paused ? "paused" : "queue " + p.tracks.length))
+            ? (state.playing
+              ? (state.output === "browser" ? "this browser" : "decode · paplay · spdif")
+              : (state.paused ? "paused" : "queue " + p.tracks.length))
               + (p.shuffle ? " · shuffle" : "")
               + (p.repeat === "one" ? " · replay 1" : (p.repeat === "all" ? " · replay all" : ""))
             : "empty /data/music");
@@ -627,6 +698,14 @@
           document.getElementById("vol-label").textContent = p.volume;
         }
         state.lastPlayer = p;
+        paintOutput(state.output);
+        if (state.output === "browser") {
+          if (p.playing) cueDeck(p);
+          else if (p.paused) { deck.pause(); }
+          else stopDeck();
+        } else {
+          stopDeck();
+        }
         renderList(p);
         renderManage(p);
       } catch (err) {
@@ -648,6 +727,9 @@
       return m + ":" + String(s).padStart(2, "0");
     }
     function livePos() {
+      if (state.output === "browser" && deck && isFinite(deck.currentTime) && (state.playing || state.paused)) {
+        return Math.max(0, deck.currentTime);
+      }
       let pos = state.position || 0;
       if (state.playing && !state.scrubbing) {
         pos += (performance.now() - (state.posAt || performance.now())) / 1000;
@@ -655,11 +737,82 @@
       if (state.duration > 0) pos = Math.min(pos, state.duration);
       return Math.max(0, pos);
     }
+    function browserRms() {
+      if (!analyser || !timeBuf || !state.playing) return 0;
+      analyser.getByteTimeDomainData(timeBuf);
+      let s = 0;
+      for (let i = 0; i < timeBuf.length; i++) {
+        const v = (timeBuf[i] - 128) / 128;
+        s += v * v;
+      }
+      return Math.min(1, Math.sqrt(s / timeBuf.length) * 3.2);
+    }
+    function hookDeck() {
+      if (audioCtx) {
+        if (audioCtx.state === "suspended") audioCtx.resume();
+        return;
+      }
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      audioCtx = new AC();
+      const src = audioCtx.createMediaElementSource(deck);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      timeBuf = new Uint8Array(analyser.fftSize);
+      src.connect(analyser);
+      analyser.connect(audioCtx.destination);
+    }
+    function mediaUrl(track) {
+      return "/api/media?name=" + encodeURIComponent(track);
+    }
+    function stopDeck() {
+      ending = false;
+      if (!deck.dataset.track && !deck.getAttribute("src")) {
+        deck.pause();
+        return;
+      }
+      deck.pause();
+      deck.removeAttribute("src");
+      deck.dataset.track = "";
+      try { deck.load(); } catch (_e) {}
+    }
+    function cueDeck(p, start) {
+      const track = p.track;
+      if (!track) return;
+      const want = (typeof start === "number") ? start : (p.position || 0);
+      if (deck.dataset.track !== track) {
+        deck.src = mediaUrl(track);
+        deck.dataset.track = track;
+        deck.onloadedmetadata = () => {
+          if (want > 0.2 && isFinite(deck.duration)) {
+            try { deck.currentTime = Math.min(want, Math.max(0, deck.duration - 0.05)); } catch (_e) {}
+          }
+        };
+      }
+      deck.volume = Math.max(0, Math.min(1, (state.volume || 80) / 100));
+      hookDeck();
+      const run = deck.play();
+      if (run && run.catch) run.catch(() => {});
+    }
+    function paintOutput(mode) {
+      const on = mode === "browser";
+      document.getElementById("out-optical").classList.toggle("armed", !on);
+      document.getElementById("out-browser").classList.toggle("armed", on);
+      document.getElementById("set-optical").classList.toggle("armed", !on);
+      document.getElementById("set-browser").classList.toggle("armed", on);
+      document.getElementById("set-note").textContent = on
+        ? "Route: this browser — optical is silent"
+        : "Route: host optical (TOSLINK)";
+    }
+    function setOutput(mode) {
+      post("/api/output", { output: mode });
+    }
     function applyPlayer(p) {
       state.playing = !!p.playing;
       state.paused = !!p.paused;
       state.shuffle = !!p.shuffle;
       state.repeat = p.repeat || "off";
+      state.output = p.output === "browser" ? "browser" : "optical";
       state.rms = typeof p.rms === "number" ? p.rms : 0;
       state.volume = typeof p.volume === "number" ? p.volume : state.volume;
       if (typeof p.position === "number") state.position = p.position;
@@ -744,9 +897,11 @@
       document.getElementById("tab-lib").classList.toggle("on", which === "lib");
       document.getElementById("tab-mgr").classList.toggle("on", which === "mgr");
       document.getElementById("tab-up").classList.toggle("on", which === "up");
+      document.getElementById("tab-set").classList.toggle("on", which === "set");
       document.getElementById("pane-lib").hidden = which !== "lib";
       document.getElementById("pane-mgr").hidden = which !== "mgr";
       document.getElementById("pane-up").hidden = which !== "up";
+      document.getElementById("pane-set").hidden = which !== "set";
     }
     function uploadFiles(fileList) {
       const files = Array.from(fileList || []);
@@ -808,11 +963,16 @@
       document.getElementById("scrub-fill").style.width = (Number(scrub.value) / 10) + "%";
     };
     function commitSeek() {
-      const dur = state.duration || 0;
+      const dur = (state.output === "browser" && isFinite(deck.duration) && deck.duration > 0)
+        ? deck.duration
+        : (state.duration || 0);
       const pos = dur * (Number(scrub.value) / 1000);
       state.position = pos;
       state.posAt = performance.now();
       state.scrubbing = false;
+      if (state.output === "browser") {
+        try { deck.currentTime = pos; } catch (_e) {}
+      }
       if (dur > 0) post("/api/seek", { seconds: pos });
     }
     scrub.onchange = commitSeek;
@@ -822,6 +982,7 @@
       const n = Number(value);
       state.volume = n;
       document.getElementById("vol-label").textContent = String(n);
+      if (state.output === "browser") deck.volume = Math.max(0, Math.min(1, n / 100));
       const fire = () => post("/api/volume", { volume: n }, { silent: true });
       if (immediate) {
         if (volTimer) clearTimeout(volTimer);
@@ -837,6 +998,45 @@
     document.getElementById("tab-lib").onclick = () => showTab("lib");
     document.getElementById("tab-mgr").onclick = () => showTab("mgr");
     document.getElementById("tab-up").onclick = () => showTab("up");
+    document.getElementById("tab-set").onclick = () => showTab("set");
+    document.getElementById("out-optical").onclick = () => setOutput("optical");
+    document.getElementById("out-browser").onclick = () => setOutput("browser");
+    document.getElementById("set-optical").onclick = () => setOutput("optical");
+    document.getElementById("set-browser").onclick = () => setOutput("browser");
+    deck.addEventListener("ended", async () => {
+      if (state.output !== "browser" || ending) return;
+      ending = true;
+      if (state.repeat === "one") {
+        try { deck.currentTime = 0; } catch (_e) {}
+        const run = deck.play();
+        if (run && run.catch) run.catch(() => {});
+        ending = false;
+        return;
+      }
+      try {
+        const r = await fetch("/api/next", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        });
+        const p = await r.json();
+        applyPlayer(p);
+        paintOutput(p.output === "browser" ? "browser" : "optical");
+        if (p.playing) cueDeck(p, 0);
+        else stopDeck();
+        refresh();
+      } catch (_e) {
+        stopDeck();
+      }
+      ending = false;
+    });
+    deck.addEventListener("timeupdate", () => {
+      if (state.output === "browser" && isFinite(deck.duration) && deck.duration > 0) {
+        state.duration = deck.duration;
+        state.position = deck.currentTime;
+        state.posAt = performance.now();
+      }
+    });
     const drop = document.getElementById("drop");
     const file = document.getElementById("file");
     file.onchange = () => uploadFiles(file.files);

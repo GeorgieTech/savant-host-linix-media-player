@@ -13,6 +13,7 @@ import sys
 import threading
 import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("WEBUI_PORT", "80"))
@@ -22,10 +23,21 @@ RMS_RE = re.compile(r"RMS(?:_level| level dB:)\s*=?\s*(-?[\d.]+)")
 DUR_RE = re.compile(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
 OUT_RE = re.compile(r"out_time=(\d+):(\d+):(\d+(?:\.\d+)?)")
 MAX_UPLOAD = 90 * 1024 * 1024
-VERSION = "0.4"
+VERSION = "0.5"
 REPEAT_MODES = ("off", "all", "one")
+OUTPUTS = ("optical", "browser")
 PULSE_SINK = os.environ.get("PULSE_SINK", "@DEFAULT_SINK@")
 LIBRARY_FILE = os.path.join(MUSIC_DIR, ".library.json")
+SETTINGS_FILE = os.path.join(MUSIC_DIR, ".settings.json")
+MIME = {
+    ".mp3": "audio/mpeg",
+    ".flac": "audio/flac",
+    ".opus": "audio/ogg",
+    ".ogg": "audio/ogg",
+    ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+}
 GENRES = [
     "Pop",
     "Rock",
@@ -118,7 +130,10 @@ class Jukebox:
         self.bag = []
         self.vol_actual = 80
         self.vol_target = 80
+        self.output = "optical"
+        self.session = False
         self._load_tags()
+        self._load_settings()
         self._apply_pulse_volume(self.volume)
         threading.Thread(target=self._fade_loop, daemon=True).start()
 
@@ -137,6 +152,23 @@ class Jukebox:
             json.dump({"tags": self.tags}, fh)
         os.replace(tmp, LIBRARY_FILE)
 
+    def _load_settings(self):
+        try:
+            with open(SETTINGS_FILE, "r") as fh:
+                data = json.load(fh)
+            out = data.get("output")
+            if out in OUTPUTS:
+                self.output = out
+        except Exception:
+            self.output = "optical"
+
+    def _save_settings(self):
+        os.makedirs(MUSIC_DIR, exist_ok=True)
+        tmp = SETTINGS_FILE + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump({"output": self.output}, fh)
+        os.replace(tmp, SETTINGS_FILE)
+
     def tracks(self):
         found = []
         if not os.path.isdir(MUSIC_DIR):
@@ -150,6 +182,8 @@ class Jukebox:
         return found
 
     def _alive(self):
+        if self.output == "browser":
+            return bool(self.session)
         return self.proc is not None and self.proc.poll() is None
 
     def _position_locked(self):
@@ -236,7 +270,9 @@ class Jukebox:
                 "duration": duration,
                 "shuffle": self.shuffle,
                 "repeat": self.repeat,
-                "backend": "ffmpeg | paplay",
+                "output": self.output,
+                "outputs": list(OUTPUTS),
+                "backend": "browser" if self.output == "browser" else "ffmpeg | paplay",
                 "version": VERSION,
             }
 
@@ -248,6 +284,7 @@ class Jukebox:
             return True
 
     def _stop_locked(self):
+        self.session = False
         if self.proc is None:
             self.paused = False
             self.offset = 0.0
@@ -394,6 +431,47 @@ class Jukebox:
             self.error = ""
             return True
 
+    def set_output(self, value):
+        if value not in OUTPUTS:
+            self.error = "unknown output"
+            return False
+        with self.lock:
+            if value == self.output:
+                self.error = ""
+                return True
+            was_playing = self._alive()
+            pos = self._position_locked() if was_playing else 0.0
+            paused = bool(self.paused and was_playing)
+            self.output = value
+            try:
+                self._save_settings()
+            except Exception as exc:
+                self.error = str(exc)
+                return False
+            self.generation += 1
+            self._stop_locked()
+            if not was_playing:
+                self.error = ""
+                return True
+            if value == "browser":
+                tracks = self.tracks()
+                if tracks:
+                    self.index %= len(tracks)
+                    self.track = tracks[self.index]
+                    if self.duration <= 0:
+                        self.duration = self._probe_duration(self.track)
+                self.session = True
+                self.paused = paused
+                self.offset = pos
+                self.hold = pos
+                self.t0 = time.monotonic()
+                self.error = ""
+                return True
+            ok = self._play_locked(start=pos)
+            if ok and paused:
+                return self._pause_locked()
+            return ok
+
     def play(self, index=None):
         with self.lock:
             if index is not None:
@@ -451,26 +529,36 @@ class Jukebox:
                 pos = 0.0
             if self.duration > 0:
                 pos = min(pos, max(0.0, self.duration - 0.15))
+            if self.output == "browser":
+                if not self.session:
+                    return self._play_locked(start=pos)
+                self.offset = pos
+                self.hold = pos
+                self.t0 = time.monotonic()
+                self.error = ""
+                return True
             return self._play_locked(start=pos)
 
     def _pause_locked(self):
-        try:
-            self.hold = self._position_locked()
-            os.killpg(os.getpgid(self.proc.pid), signal.SIGSTOP)
-        except Exception as exc:
-            self.error = str(exc)
-            return False
+        self.hold = self._position_locked()
+        if self.output != "browser":
+            try:
+                os.killpg(os.getpgid(self.proc.pid), signal.SIGSTOP)
+            except Exception as exc:
+                self.error = str(exc)
+                return False
         self.paused = True
         self.rms = 0.0
         self.error = ""
         return True
 
     def _resume_locked(self):
-        try:
-            os.killpg(os.getpgid(self.proc.pid), signal.SIGCONT)
-        except Exception as exc:
-            self.error = str(exc)
-            return False
+        if self.output != "browser":
+            try:
+                os.killpg(os.getpgid(self.proc.pid), signal.SIGCONT)
+            except Exception as exc:
+                self.error = str(exc)
+                return False
         self.t0 = time.monotonic() - (self.hold - self.offset)
         self.paused = False
         self.rms = 0.15
@@ -563,6 +651,16 @@ class Jukebox:
         self.generation += 1
         gen = self.generation
         self._stop_locked()
+        if self.output == "browser":
+            self.session = True
+            self.track = path
+            self.offset = start
+            self.hold = keep_hold
+            self.t0 = time.monotonic()
+            self.paused = False
+            self.error = ""
+            self.rms = 0.2
+            return True
         ss = "-ss %.3f " % start if start > 0.04 else ""
         cmd = (
             "ffmpeg -nostdin -hide_banner -nostats -loglevel info -progress pipe:2 %s-i %s "
@@ -697,6 +795,69 @@ def _safe_music_name(name):
     return name
 
 
+def _safe_media_path(name):
+    name = (name or "").replace("\\", "/").lstrip("/")
+    if not name or name in (".", "..") or ".." in name.split("/"):
+        return None
+    ext = os.path.splitext(name)[1].lower()
+    if ext not in AUDIO_EXTS:
+        return None
+    root = os.path.realpath(MUSIC_DIR)
+    full = os.path.realpath(os.path.join(MUSIC_DIR, name))
+    if full != root and not full.startswith(root + os.sep):
+        return None
+    if not os.path.isfile(full):
+        return None
+    return full
+
+
+def send_media(handler, full, head=False):
+    size = os.path.getsize(full)
+    ext = os.path.splitext(full)[1].lower()
+    mime = MIME.get(ext, "application/octet-stream")
+    start = 0
+    end = size - 1
+    code = 200
+    rng = handler.headers.get("Range") or ""
+    if rng.startswith("bytes=") and size > 0:
+        spec = rng.split("=", 1)[1].split("-")
+        try:
+            if spec[0]:
+                start = int(spec[0])
+            if len(spec) > 1 and spec[1]:
+                end = int(spec[1])
+        except ValueError:
+            handler.send_error(400, "bad range")
+            return
+        end = min(end, size - 1)
+        if start < 0 or start > end:
+            handler.send_response(416)
+            handler.send_header("Content-Range", "bytes */%s" % size)
+            handler.end_headers()
+            return
+        code = 206
+    length = end - start + 1
+    handler.send_response(code)
+    handler.send_header("Content-Type", mime)
+    handler.send_header("Content-Length", str(length))
+    handler.send_header("Accept-Ranges", "bytes")
+    handler.send_header("Cache-Control", "private, max-age=120")
+    if code == 206:
+        handler.send_header("Content-Range", "bytes %s-%s/%s" % (start, end, size))
+    handler.end_headers()
+    if head:
+        return
+    with open(full, "rb") as fh:
+        fh.seek(start)
+        left = length
+        while left > 0:
+            chunk = fh.read(min(65536, left))
+            if not chunk:
+                break
+            handler.wfile.write(chunk)
+            left -= len(chunk)
+
+
 def save_uploads(handler):
     length = int(handler.headers.get("Content-Length") or 0)
     disk = disk_usage("/data")
@@ -763,14 +924,37 @@ class Handler(SimpleHTTPRequestHandler):
         sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
 
     def do_GET(self):
-        path = self.path.split("?", 1)[0]
+        parsed = urlparse(self.path)
+        path = parsed.path
         if path == "/api/status":
             _json(self, status())
             return
         if path == "/api/player":
             _json(self, PLAYER.snapshot())
             return
+        if path == "/api/media":
+            qs = parse_qs(parsed.query)
+            name = (qs.get("name") or [""])[0]
+            full = _safe_media_path(name)
+            if not full:
+                _json(self, {"error": "not found"}, 404)
+                return
+            send_media(self, full, head=False)
+            return
         return super().do_GET()
+
+    def do_HEAD(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/media":
+            qs = parse_qs(parsed.query)
+            name = (qs.get("name") or [""])[0]
+            full = _safe_media_path(name)
+            if not full:
+                self.send_error(404)
+                return
+            send_media(self, full, head=True)
+            return
+        return super().do_HEAD()
 
     def do_POST(self):
         path = self.path.split("?", 1)[0]
@@ -814,6 +998,10 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/repeat":
             PLAYER.set_repeat(data.get("repeat"))
             _json(self, PLAYER.snapshot())
+            return
+        if path == "/api/output":
+            ok = PLAYER.set_output(data.get("output"))
+            _json(self, PLAYER.snapshot(), 200 if ok else 400)
             return
         if path == "/api/tag":
             ok = PLAYER.set_genre(data.get("index"), data.get("genre"))
