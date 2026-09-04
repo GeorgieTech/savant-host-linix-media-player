@@ -355,6 +355,11 @@
       color: #03110c;
       font-weight: 600;
     }
+    button.armed {
+      color: var(--amber);
+      border-color: rgba(255, 154, 60, 0.7);
+      background: rgba(255, 154, 60, 0.12);
+    }
     .vol {
       display: flex;
       align-items: center;
@@ -378,8 +383,18 @@
       letter-spacing: 0.08em;
     }
     .stats b { color: var(--ink); font-weight: 500; }
+    .remain {
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      gap: 1.4rem;
+    }
+    .remain b {
+      color: var(--amber);
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
     @media (max-width: 860px) {
-      .stats { display: none; }
+      .stats.host-meta { display: none; }
       body { overflow: auto; }
       .hud { height: auto; min-height: 100%; }
       .stage { grid-template-columns: 1fr; }
@@ -416,6 +431,8 @@
           <button id="btn-pause" type="button">Pause</button>
           <button id="btn-stop" type="button">Stop</button>
           <button id="btn-next" type="button">Next</button>
+          <button id="btn-shuffle" type="button">Shuffle</button>
+          <button id="btn-repeat" type="button">Replay</button>
           <label class="vol">Vol
             <input id="vol" type="range" min="0" max="100" value="80">
             <span id="vol-label">80</span>
@@ -440,19 +457,22 @@
       </aside>
     </div>
     <div class="bottom">
-      <div class="stats">
+      <div class="stats host-meta">
         <span>HOST <b id="hostname">—</b></span>
         <span>NET <b id="ip">—</b></span>
         <span>UP <b id="uptime">—</b></span>
-        <span>MEM <b id="mem">—</b></span>
       </div>
-      <div class="stats"><span id="stamp"></span></div>
+      <div class="stats remain">
+        <span>RAM left <b id="mem-left">—</b></span>
+        <span>DISK left <b id="disk-left">—</b></span>
+      </div>
     </div>
   </div>
   <script>
     const state = {
       playing: false, paused: false, rms: 0, volume: 80,
       position: 0, duration: 0, posAt: 0, scrubbing: false,
+      shuffle: false, repeat: "off",
       bins: new Float32Array(72), filter: "", lastPlayer: null
     };
     const canvas = document.getElementById("viz");
@@ -574,9 +594,10 @@
         document.getElementById("hostname").textContent = d.hostname || "—";
         document.getElementById("ip").textContent = d.ip || "—";
         document.getElementById("uptime").textContent = d.uptime || "—";
-        document.getElementById("mem").textContent = d.mem
-          ? fmtBytes(d.mem.used) + " / " + fmtBytes(d.mem.total)
-          : "—";
+        const memFree = d.mem ? (d.mem.free != null ? d.mem.free : Math.max(0, (d.mem.total || 0) - (d.mem.used || 0))) : null;
+        const diskFree = d.disk ? (d.disk.free != null ? d.disk.free : Math.max(0, (d.disk.total || 0) - (d.disk.used || 0))) : null;
+        document.getElementById("mem-left").textContent = memFree != null ? fmtBytes(memFree) : "—";
+        document.getElementById("disk-left").textContent = diskFree != null ? fmtBytes(diskFree) : "—";
         const p = d.player || {};
         applyPlayer(p);
         const chip = document.getElementById("chip");
@@ -588,11 +609,19 @@
         sub.textContent = p.error
           ? p.error
           : ((p.tracks && p.tracks.length)
-            ? (state.playing ? "decode · paplay · spdif" : (state.paused ? "paused" : "library " + p.tracks.length))
+            ? (state.playing ? "decode · paplay · spdif" : (state.paused ? "paused" : "queue " + p.tracks.length))
+              + (p.shuffle ? " · shuffle" : "")
+              + (p.repeat === "one" ? " · replay 1" : (p.repeat === "all" ? " · replay all" : ""))
             : "empty /data/music");
         const pauseBtn = document.getElementById("btn-pause");
         pauseBtn.textContent = state.paused ? "Resume" : "Pause";
         pauseBtn.disabled = !state.playing && !state.paused;
+        const shuf = document.getElementById("btn-shuffle");
+        shuf.classList.toggle("armed", !!p.shuffle);
+        const rep = document.getElementById("btn-repeat");
+        const mode = p.repeat || "off";
+        rep.classList.toggle("armed", mode !== "off");
+        rep.textContent = mode === "one" ? "Replay 1" : (mode === "all" ? "Replay all" : "Replay");
         if (typeof p.volume === "number" && document.activeElement !== document.getElementById("vol")) {
           document.getElementById("vol").value = p.volume;
           document.getElementById("vol-label").textContent = p.volume;
@@ -600,7 +629,6 @@
         state.lastPlayer = p;
         renderList(p);
         renderManage(p);
-        document.getElementById("stamp").textContent = new Date().toLocaleTimeString();
       } catch (err) {
         document.getElementById("player-sub").textContent = String(err.message || err);
         document.getElementById("player-sub").className = "meta err";
@@ -630,6 +658,8 @@
     function applyPlayer(p) {
       state.playing = !!p.playing;
       state.paused = !!p.paused;
+      state.shuffle = !!p.shuffle;
+      state.repeat = p.repeat || "off";
       state.rms = typeof p.rms === "number" ? p.rms : 0;
       state.volume = typeof p.volume === "number" ? p.volume : state.volume;
       if (typeof p.position === "number") state.position = p.position;
@@ -752,13 +782,13 @@
       xhr.open("POST", "/api/upload");
       xhr.send(fd);
     }
-    async function post(path, body) {
+    async function post(path, body, opts) {
       await fetch(path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body || {}),
       });
-      refresh();
+      if (!opts || !opts.silent) refresh();
     }
     document.getElementById("btn-play").onclick = () => post("/api/play");
     document.getElementById("btn-pause").onclick = () => {
@@ -767,6 +797,8 @@
     };
     document.getElementById("btn-stop").onclick = () => post("/api/stop");
     document.getElementById("btn-next").onclick = () => post("/api/next");
+    document.getElementById("btn-shuffle").onclick = () => post("/api/shuffle", { shuffle: !state.shuffle });
+    document.getElementById("btn-repeat").onclick = () => post("/api/repeat");
     const scrub = document.getElementById("scrub");
     scrub.oninput = () => {
       state.scrubbing = true;
@@ -785,12 +817,23 @@
     }
     scrub.onchange = commitSeek;
     scrub.onkeyup = (ev) => { if (ev.key === "Enter") commitSeek(); };
-    document.getElementById("vol").oninput = (ev) => {
-      document.getElementById("vol-label").textContent = ev.target.value;
-    };
-    document.getElementById("vol").onchange = (ev) => {
-      post("/api/volume", { volume: Number(ev.target.value) });
-    };
+    let volTimer = null;
+    function sendVolume(value, immediate) {
+      const n = Number(value);
+      state.volume = n;
+      document.getElementById("vol-label").textContent = String(n);
+      const fire = () => post("/api/volume", { volume: n }, { silent: true });
+      if (immediate) {
+        if (volTimer) clearTimeout(volTimer);
+        volTimer = null;
+        fire();
+        return;
+      }
+      if (volTimer) clearTimeout(volTimer);
+      volTimer = setTimeout(fire, 40);
+    }
+    document.getElementById("vol").oninput = (ev) => sendVolume(ev.target.value, false);
+    document.getElementById("vol").onchange = (ev) => sendVolume(ev.target.value, true);
     document.getElementById("tab-lib").onclick = () => showTab("lib");
     document.getElementById("tab-mgr").onclick = () => showTab("mgr");
     document.getElementById("tab-up").onclick = () => showTab("up");

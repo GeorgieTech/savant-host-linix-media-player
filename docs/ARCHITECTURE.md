@@ -18,12 +18,12 @@ browser  --HTTP-->  python3 server.py :80
                          +-- GET /           UI
                          +-- GET /api/status host stats
                          +-- GET /api/player now playing, queue
-                         +-- POST /api/play|/pause|/stop|/next|/volume|/seek
+                         +-- POST /api/play|/pause|/stop|/next|/volume|/seek|/shuffle|/repeat
                          |
                          +-- child: ffmpeg | paplay   (V0.1+)
 ```
 
-Only one decoder child at a time. Stop = kill the child. Next = kill, start the next file. Pause = SIGSTOP the process group (ffmpeg + paplay); Resume = SIGCONT. Seek = kill and restart ffmpeg with `-ss`.
+Only one decoder child at a time. Stop = kill the child. Next = kill, start the next file. End of track auto-advances the queue (sequential or shuffle). Pause = SIGSTOP the process group (ffmpeg + paplay); Resume = SIGCONT. Seek = kill and restart ffmpeg with `-ss`. Volume = Pulse sink fade, no decoder restart.
 
 ## Library
 
@@ -33,7 +33,7 @@ Only one decoder child at a time. Stop = kill the child. Next = kill, start the 
   something.flac
 ```
 
-Scan on demand for `.mp3` `.flac` `.opus` `.ogg` `.wav` `.m4a`. Sort by path. Queue is that list in order unless we add shuffle later. V0.1 ships one demo file: `Saxophones getting louder.opus`.
+Scan on demand for `.mp3` `.flac` `.opus` `.ogg` `.wav` `.m4a`. Sort by path. Picking track N starts playback there and the rest of the library follows (wraps only if Replay all is on, or if you hit Next). Shuffle uses a random bag of remaining indices. Replay cycles off / all / one.
 
 `/data` is the 3.1 GB persistent partition. Leave headroom; a few hundred albums of MP3 is the right scale, not a FLAC archive of the whole collection.
 
@@ -45,18 +45,13 @@ V0.1 uses binaries already on the 9.4.6 image:
 - **Output:** `/usr/bin/paplay` → PulseAudio system daemon
 - **Hardware sink:** S/PDIF only (`imx-spdif`). There is no analog headphone ALSA device on this board.
 
-Pipeline: `ffmpeg -i file -filter:a volume=N -f wav - | paplay`
+Pipeline: `ffmpeg -i file -f wav - | paplay` (unity decode). Volume is PulseAudio sink gain.
 
 `mpg123` / `flac` are not installed. Do not `apt` on this Yocto image. Optional later: drop static **linux-armv7** `mpv` into `/data/opt`.
 
 ## Volume
 
-Software gain in the player:
-
-- mpg123: `-f` / software scale
-- ffmpeg/mpv: volume filter or `--volume`
-
-Do not depend on `amixer` until ALSA device names on this i.MX6 are confirmed. PulseAudio was a Savant dependency; it may be idle now.
+PulseAudio sink volume (`pactl set-sink-volume`), faded in small steps so the slider does not restart ffmpeg/paplay. Hardware ALSA mixer is still unused.
 
 ## UI
 
@@ -65,9 +60,12 @@ Same visual language as the current lab page (dark panel, copper accent). Transp
 - Play
 - Pause / Resume
 - Stop
-- Volume
 - Next
+- Shuffle
+- Replay (off / all / one)
+- Volume (fade)
 - Seek bar (elapsed / duration) plus a progress ring on the HUD
+- RAM left / disk left on `/data`
 
 Now-playing line under the buttons. No accounts, no websockets required: short polling of `/api/player` is enough. Position is wall-clock plus ffmpeg `out_time`, duration from `ffprobe` (ffmpeg Duration line as fallback).
 

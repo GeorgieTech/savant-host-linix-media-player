@@ -2,6 +2,7 @@
 import cgi
 import json
 import os
+import random
 import re
 import shlex
 import shutil
@@ -21,7 +22,9 @@ RMS_RE = re.compile(r"RMS(?:_level| level dB:)\s*=?\s*(-?[\d.]+)")
 DUR_RE = re.compile(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
 OUT_RE = re.compile(r"out_time=(\d+):(\d+):(\d+(?:\.\d+)?)")
 MAX_UPLOAD = 90 * 1024 * 1024
-VERSION = "0.3"
+VERSION = "0.4"
+REPEAT_MODES = ("off", "all", "one")
+PULSE_SINK = os.environ.get("PULSE_SINK", "@DEFAULT_SINK@")
 LIBRARY_FILE = os.path.join(MUSIC_DIR, ".library.json")
 GENRES = [
     "Pop",
@@ -61,7 +64,7 @@ def meminfo():
     avail = data.get("MemAvailable") or data.get("MemFree")
     if not total:
         return None
-    return {"total": total, "used": total - (avail or 0)}
+    return {"total": total, "used": total - (avail or 0), "free": avail or 0}
 
 
 def disk_usage(path="/data"):
@@ -69,7 +72,7 @@ def disk_usage(path="/data"):
         st = os.statvfs(path)
         total = st.f_frsize * st.f_blocks
         free = st.f_frsize * st.f_bavail
-        return {"total": total, "used": total - free, "path": path}
+        return {"total": total, "used": total - free, "free": free, "path": path}
     except Exception:
         return None
 
@@ -109,7 +112,15 @@ class Jukebox:
         self.hold = 0.0
         self.duration = 0.0
         self.durations = {}
+        self.generation = 0
+        self.shuffle = False
+        self.repeat = "off"
+        self.bag = []
+        self.vol_actual = 80
+        self.vol_target = 80
         self._load_tags()
+        self._apply_pulse_volume(self.volume)
+        threading.Thread(target=self._fade_loop, daemon=True).start()
 
     def _load_tags(self):
         try:
@@ -193,12 +204,6 @@ class Jukebox:
     def snapshot(self):
         with self.lock:
             tracks = self.tracks()
-            if self.proc is not None and self.proc.poll() is not None:
-                if self.duration:
-                    self.hold = self.duration
-                self.proc = None
-                self.paused = False
-                self.rms = 0.0
             names = [os.path.relpath(p, MUSIC_DIR) for p in tracks]
             keep = set(names)
             if any(key not in keep for key in list(self.tags.keys())):
@@ -229,12 +234,15 @@ class Jukebox:
                 "rms": round(self.rms, 3) if playing else 0.0,
                 "position": position,
                 "duration": duration,
+                "shuffle": self.shuffle,
+                "repeat": self.repeat,
                 "backend": "ffmpeg | paplay",
                 "version": VERSION,
             }
 
     def stop(self):
         with self.lock:
+            self.generation += 1
             self._stop_locked()
             self.error = ""
             return True
@@ -272,6 +280,39 @@ class Jukebox:
         self.offset = 0.0
         self.hold = 0.0
 
+    def _apply_pulse_volume(self, vol):
+        vol = max(0, min(100, int(vol)))
+        try:
+            subprocess.check_call(
+                ["pactl", "set-sink-volume", PULSE_SINK, "%s%%" % vol],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return True
+        except Exception:
+            return False
+
+    def _fade_loop(self):
+        while True:
+            with self.lock:
+                target = self.vol_target
+                actual = self.vol_actual
+            if actual == target:
+                time.sleep(0.03)
+                continue
+            delta = target - actual
+            step = max(1, min(6, abs(delta) // 8 or 1))
+            if abs(delta) <= step:
+                actual = target
+            elif delta > 0:
+                actual += step
+            else:
+                actual -= step
+            self._apply_pulse_volume(actual)
+            with self.lock:
+                self.vol_actual = actual
+            time.sleep(0.02)
+
     def set_volume(self, value):
         try:
             vol = int(value)
@@ -279,12 +320,42 @@ class Jukebox:
             return False
         vol = max(0, min(100, vol))
         with self.lock:
-            restart = self._alive()
-            pos = self._position_locked() if restart else 0.0
             self.volume = vol
-            if restart:
-                return self._play_locked(start=pos)
+            self.vol_target = vol
+            self.error = ""
         return True
+
+    def _reshuffle_locked(self, n, current):
+        ids = [i for i in range(n) if i != current]
+        random.shuffle(ids)
+        self.bag = ids
+
+    def _next_index_locked(self, wrap, skip_repeat_one=False):
+        tracks = self.tracks()
+        n = len(tracks)
+        if n <= 0:
+            return None
+        if self.repeat == "one" and not skip_repeat_one:
+            return self.index
+        if self.shuffle:
+            valid = []
+            for item in self.bag:
+                if 0 <= item < n and item != self.index:
+                    valid.append(item)
+            self.bag = valid
+            if not self.bag:
+                if not (self.repeat == "all" or wrap):
+                    return None
+                self._reshuffle_locked(n, self.index)
+            if not self.bag:
+                return 0 if n == 1 else (self.index + 1) % n
+            return self.bag.pop(0)
+        nxt = self.index + 1
+        if nxt >= n:
+            if self.repeat == "all" or wrap:
+                return 0
+            return None
+        return nxt
 
     def next_track(self):
         with self.lock:
@@ -292,8 +363,36 @@ class Jukebox:
             if not tracks:
                 self.error = "no tracks in /data/music"
                 return False
-            self.index = (self.index + 1) % len(tracks)
+            nxt = self._next_index_locked(wrap=True, skip_repeat_one=True)
+            if nxt is None:
+                self.error = "end of queue"
+                return False
+            self.index = nxt
             return self._play_locked()
+
+    def set_shuffle(self, value=None):
+        with self.lock:
+            if value is None:
+                self.shuffle = not self.shuffle
+            else:
+                self.shuffle = bool(value)
+            tracks = self.tracks()
+            if self.shuffle and tracks:
+                self._reshuffle_locked(len(tracks), self.index if tracks else 0)
+            else:
+                self.bag = []
+            self.error = ""
+            return True
+
+    def set_repeat(self, value=None):
+        with self.lock:
+            if value in REPEAT_MODES:
+                self.repeat = value
+            else:
+                idx = REPEAT_MODES.index(self.repeat) if self.repeat in REPEAT_MODES else 0
+                self.repeat = REPEAT_MODES[(idx + 1) % len(REPEAT_MODES)]
+            self.error = ""
+            return True
 
     def play(self, index=None):
         with self.lock:
@@ -308,6 +407,8 @@ class Jukebox:
                     self.error = "bad track index"
                     return False
                 self.index = index
+                if self.shuffle:
+                    self._reshuffle_locked(len(tracks), index)
                 return self._play_locked(start=0.0)
             if self.paused and self._alive():
                 return self._resume_locked()
@@ -459,14 +560,15 @@ class Jukebox:
         if self.duration and start >= max(0.0, self.duration - 0.2):
             start = 0.0
         keep_hold = start
+        self.generation += 1
+        gen = self.generation
         self._stop_locked()
-        gain = max(0.0, min(1.0, self.volume / 100.0))
         ss = "-ss %.3f " % start if start > 0.04 else ""
         cmd = (
             "ffmpeg -nostdin -hide_banner -nostats -loglevel info -progress pipe:2 %s-i %s "
-            "-filter:a volume=%s,astats=length=0.05:metadata=1:reset=1 "
+            "-filter:a astats=length=0.05:metadata=1:reset=1 "
             "-ac 2 -ar 48000 -f wav - | paplay"
-            % (ss, shlex.quote(path), gain)
+            % (ss, shlex.quote(path))
         )
         try:
             self.proc = subprocess.Popen(
@@ -481,7 +583,10 @@ class Jukebox:
             self.proc = None
             self.rms = 0.0
             return False
-        threading.Thread(target=self._meter, args=(self.proc,), daemon=True).start()
+        threading.Thread(target=self._meter, args=(self.proc, gen), daemon=True).start()
+        self._apply_pulse_volume(self.volume)
+        self.vol_actual = self.volume
+        self.vol_target = self.volume
         self.track = path
         self.offset = start
         self.hold = keep_hold
@@ -491,7 +596,14 @@ class Jukebox:
         self.rms = 0.15
         return True
 
-    def _meter(self, proc):
+    def _advance_locked(self):
+        nxt = self._next_index_locked(wrap=False)
+        if nxt is None:
+            return False
+        self.index = nxt
+        return self._play_locked(start=0.0)
+
+    def _meter(self, proc, gen):
         try:
             while True:
                 line = proc.stderr.readline()
@@ -502,7 +614,7 @@ class Jukebox:
                 out = OUT_RE.search(text)
                 match = RMS_RE.search(text)
                 with self.lock:
-                    if self.proc is not proc:
+                    if self.generation != gen or self.proc is not proc:
                         continue
                     if dur and self.duration <= 0:
                         self.duration = _hms(dur)
@@ -517,14 +629,16 @@ class Jukebox:
         except Exception:
             pass
         with self.lock:
-            if self.proc is proc:
-                self.proc = None
-                self.rms = 0.0
-                self.paused = False
-                if self.duration:
-                    self.hold = self.duration
-                else:
-                    self.hold = self.offset + max(0.0, time.monotonic() - self.t0)
+            if self.generation != gen or self.proc is not proc:
+                return
+            self.proc = None
+            self.rms = 0.0
+            self.paused = False
+            if self.duration:
+                self.hold = self.duration
+            else:
+                self.hold = self.offset + max(0.0, time.monotonic() - self.t0)
+            self._advance_locked()
 
 
 PLAYER = Jukebox()
@@ -692,6 +806,14 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/volume":
             ok = PLAYER.set_volume(data.get("volume"))
             _json(self, PLAYER.snapshot(), 200 if ok else 400)
+            return
+        if path == "/api/shuffle":
+            PLAYER.set_shuffle(data.get("shuffle"))
+            _json(self, PLAYER.snapshot())
+            return
+        if path == "/api/repeat":
+            PLAYER.set_repeat(data.get("repeat"))
+            _json(self, PLAYER.snapshot())
             return
         if path == "/api/tag":
             ok = PLAYER.set_genre(data.get("index"), data.get("genre"))

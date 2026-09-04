@@ -1,6 +1,6 @@
 # savant-host-linix-media-player
 
-Local jukebox for a recycled Savant SHC-2000 ARM Linux host. One process, files on disk, a tiny web page for Play / Pause / Stop / volume / next / seek.
+Local jukebox for a recycled Savant SHC-2000 ARM Linux host. One process, files on disk, a tiny web page for Play / Pause / Stop / volume / next / seek / shuffle / replay.
 
 This project is **not affiliated with Savant Systems**. The hardware is a former Smart Host whose Savant runtime has been stopped. The Linux image underneath is reused as a small LAN appliance.
 
@@ -10,10 +10,10 @@ This project is **not affiliated with Savant Systems**. The hardware is a former
 
 - Music lives on the host at `/data/music`
 - One Python process serves the UI on **port 80** and owns playback
-- Browser on the LAN: Play, Pause, Stop, software volume, Next, seek bar
+- Browser on the LAN: Play, Pause, Stop, Next, seek, shuffle, replay, volume fade
 - No cloud, no Savant app, no extra daemon if we can avoid it
 
-## Current status — V0.3
+## Current status — V0.4
 
 Target host: **192.168.1.180** (`sav-001aae073afe0000`)
 
@@ -21,11 +21,13 @@ Target host: **192.168.1.180** (`sav-001aae073afe0000`)
 |---|---|
 | Savant `startupManager` | Stopped, systemd unit **masked** |
 | Boot target | `multi-user.target` |
-| Web UI | [http://192.168.1.180/](http://192.168.1.180/) — Play / Pause / Stop / Next / volume / seek / library / upload / manage |
+| Web UI | [http://192.168.1.180/](http://192.168.1.180/) — Play / Pause / Stop / Next / shuffle / replay / volume fade / seek / library / upload / manage |
 | Code on host | `/data/www` |
 | Library | `/data/music` (audio only; not stored in this git repo) |
 | Tags | `/data/music/.library.json` (genre tags, on the host) |
 | Playback | `ffmpeg` decode → `paplay` (PulseAudio, S/PDIF sink on this board) |
+| Queue | Play from a picked track, then continue to the next (or shuffled bag) |
+| Volume | Pulse sink fade; does not restart the decoder |
 | Pause | SIGSTOP / SIGCONT on the decode+play process group |
 | Seek | HUD bar + radar ring; restart ffmpeg at `-ss` |
 
@@ -49,7 +51,7 @@ Prefer tools that already exist or a single `armv7` drop under `/data/opt`:
 | FLAC | `flac -d -c` piped to `aplay` |
 | Fallback | `mpv` or `ffmpeg` static **armv7** build in `/data/opt` |
 
-Volume is software (player `--scale` / `ffmpeg -filter:a volume=`), not ALSA mixer, until we prove hardware volume is stable on this board.
+Volume is PulseAudio sink gain with a short fade. The decoder is not restarted when the slider moves.
 
 ## Host paths
 
