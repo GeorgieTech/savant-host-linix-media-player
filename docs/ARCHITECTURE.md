@@ -56,7 +56,7 @@ PulseAudio sink volume (`pactl set-sink-volume`), faded in small steps so the sl
 
 ## UI
 
-Same visual language as the current lab page (dark panel, copper accent). Transport:
+Giggwatt HUD (time circuits, red/green/amber LEDs). Transport:
 
 - Play
 - Pause / Resume

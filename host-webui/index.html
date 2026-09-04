@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>GIGAWATT</title>
+  <title>Giggwatt</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -527,7 +527,7 @@
     <div class="top">
       <div>
         <div class="mark">Time circuits</div>
-        <h1 id="title">GIGAWATT</h1>
+        <h1 id="title">Giggwatt</h1>
       </div>
       <div class="top-actions">
         <div class="route" role="group" aria-label="Audio output">
@@ -599,7 +599,7 @@
         <div id="pane-set" hidden>
           <div class="set">
             <h2>Audio out</h2>
-            <p>Pick where the queue plays. Optical is the host TOSLINK jack into a preamp. Browser plays on this phone or computer and keeps the optical port silent.</p>
+            <p>Giggwatt can play the queue on the host TOSLINK jack into a preamp, or in this browser. Browser mode keeps the optical port silent.</p>
             <div class="route" role="group" aria-label="Audio output">
               <button type="button" id="set-optical">Host optical</button>
               <button type="button" id="set-browser">This browser</button>
@@ -730,7 +730,7 @@
         const r = await fetch("/api/status", { cache: "no-store" });
         if (!r.ok) throw new Error("http " + r.status);
         const d = await r.json();
-        document.getElementById("title").textContent = "GIGAWATT";
+        document.getElementById("title").textContent = "Giggwatt";
         document.getElementById("hostname").textContent = d.hostname || "\u2014";
         document.getElementById("ip").textContent = d.ip || "\u2014";
         document.getElementById("uptime").textContent = d.uptime || "\u2014";
@@ -803,7 +803,7 @@
       const left = (state.duration > 0) ? Math.max(0, state.duration - livePos()) : null;
       document.getElementById("dest-val").textContent = track;
       document.getElementById("dest-clk").textContent = state.playing || state.paused ? remainStamp(left) : "OCT 26 1985";
-      document.getElementById("present-val").textContent = (d && d.hostname) || "HOST";
+      document.getElementById("present-val").textContent = "Giggwatt";
       document.getElementById("present-clk").textContent = circuitStamp(new Date());
       document.getElementById("departed-val").textContent = state.departedTrack;
       document.getElementById("departed-clk").textContent = state.departedAt;
