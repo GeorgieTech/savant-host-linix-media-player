@@ -25,7 +25,7 @@ RMS_RE = re.compile(r"RMS(?:_level| level dB:)\s*=?\s*(-?[\d.]+)")
 DUR_RE = re.compile(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
 OUT_RE = re.compile(r"out_time=(\d+):(\d+):(\d+(?:\.\d+)?)")
 MAX_UPLOAD = 90 * 1024 * 1024
-VERSION = "0.7"
+VERSION = "Beta1"
 AIRPLAY_DIR = os.environ.get("AIRPLAY_DIR", "/data/opt/airplay")
 REPEAT_MODES = ("off", "all", "one")
 OUTPUTS = ("optical", "browser")

@@ -1,4 +1,4 @@
-# Host hardware — 192.168.1.180
+# Host hardware — 192.168.1.180 (Beta1)
 
 Factory product: **Savant Smart Host with Control, SHC-2000-00**.  
 This document is the measured machine, not the marketing SKU matrix.
@@ -19,7 +19,7 @@ This document is the measured machine, not the marketing SKU matrix.
 
 Sister unit on the same LAN (not this repo’s target): 192.168.1.178, serial `QSH180100203`.
 
-Do not use 192.168.1.40 (live Carrillos Resident Savant system).
+Do **not** use **192.168.1.40** (live Carrillos Resident Savant system).
 
 ## CPU
 
@@ -46,19 +46,44 @@ Do not use 192.168.1.40 (live Carrillos Resident Savant system).
 
 Project files belong on **`/data`**. Root A/B flashes replace `/` only.
 
+## Audio
+
+| Piece | Detail |
+|---|---|
+| Hardware | i.MX S/PDIF, ALSA device `imx-spdif` |
+| Jack | TOSLINK (optical) only |
+| Analog out | None in ALSA — no headphone DAC path |
+| Pulse | System daemon; paplay and shairport both use it |
+| Sample path (queue) | ffmpeg → wav pipe → paplay → Pulse → TOSLINK |
+| Sample path (AirPlay) | shairport-sync `pa` backend → Pulse → TOSLINK |
+
+Optical quality in Beta1 is stereo PCM through that sink (typical AirPlay 44.1 kHz; local files follow the decoder).
+
 ## Network and radios
 
 | Interface | Detail |
 |---|---|
 | Ethernet `eth0` | MAC `00:1A:AE:07:3A:FE` |
 | Wi-Fi | Atheros **AR6004** (`ath6kl`), MAC `00:1A:AE:07:3A:FC` |
-| Bluetooth | MAC `00:1A:AE:07:3A:FD` |
+| Bluetooth | MAC `00:1A:AE:07:3A:FD` — BLE / HCI. **No A2DP**, no Pulse Bluetooth module. Headphones over BT are not feasible on this image |
+| mDNS | Avahi (required for AirPlay advertise name **Giggwatt**) |
+
+## Chassis I/O (unused in Beta1)
+
+The original product had analog control I/O. Beta1 does not drive any of it.
+
+| I/O | Notes |
+|---|---|
+| RS-232 | Rear control jacks. Real ±12 V RS-232, not USB-TTL. i.MX UARTs include `/dev/ttymxc*` (`ttymxc4` confirmed). One UART is the Bluetooth HCI — leave that one alone |
+| IR | Unused |
+| GPIO / relay | Unused |
+
+A later Beta2 idea is Play / AirPlay → preamp power / input / unmute over RS-232. That needs the preamp make and model. See [BETA2.md](BETA2.md).
 
 ## Power / chassis
 
 - 5 V DC 3 A (~15 W)
 - Compact plastic host, roughly 8″ × 8″, ~1.3 lb
-- Onboard analog I/O from the original product (IR, RS-232, GPIO, relay) is unused by this jukebox
 
 ## Software image (as left after conversion)
 
@@ -67,7 +92,9 @@ Project files belong on **`/data`**. Root A/B flashes replace `/` only.
 - systemd 244
 - Python **3.8.2**
 - busybox, lighttpd (Savant’s lighttpd is stopped)
-- OpenSSH 8.2
+- OpenSSH 8.2 (use `scp -O` from modern clients)
+- glibc 2.31, OpenSSL 1.1.1
+- ffmpeg 4.2.2, paplay / PulseAudio
 - SSH user `RPM` (password is not stored in this repo)
 
 Savant `startupManager` is **masked**. Default target is `multi-user.target`.
